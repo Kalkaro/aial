@@ -7,27 +7,21 @@ No API keys or inference server.
 The UI bundles Geist Sans for the search box, result names, and paths; no system
 font installation or runtime font download is needed. See [font provenance and license](fonts/README.md).
 
-The panel uses the liquid-glass refraction shader adapted from
-[MacShell](https://github.com/0-ss/MacShell/tree/6b4d31b1911f3cb4590658de157d1070f6665b3a),
-with a curved rim, blurred backdrop, and subtle chromatic refraction.
-The imported rendering code was reviewed as text before compilation or execution;
-see [the source review](docs/glass-review.md).
-
 ```sh
 ./launch.sh
 ```
 
-Requires `quickshell` (`qs`), `uv`, `xdg-open`, `flock`
-(util-linux), GNU coreutils, and Qt Shader Tools (`qsb`) for liquid glass. Install
-`pdftotext` (Poppler) to search PDF contents. On first launch, Python dependencies
-and the pinned model checkpoint (~1.5 GB) are downloaded in the background.
-The search box opens immediately. After setup, inference and search work offline.
+Requires `quickshell` (`qs`), `uv`, `xdg-open`, `flock` (util-linux), and GNU
+coreutils. Install `pdftotext` (Poppler) to search PDF contents. On first launch,
+Python dependencies and the pinned model checkpoint (~1.5 GB) are downloaded in
+the background. The search box opens immediately. After setup, inference and
+search work offline.
 
 ### Stylix colors
 
 AppleSearch reads `$XDG_CONFIG_HOME/stylix/palette.json` (default
 `~/.config/stylix/palette.json`) at runtime for both local and Nix launches.
-`base00` supplies the glass tint and fallback background; text uses `base05`,
+`base00` is the panel background, at 80% opacity; text uses `base05`,
 secondary text uses `base04`, row selection uses `base02`, and accents use `base0D`.
 Light and dark palettes are detected from `base00`.
 
@@ -57,48 +51,11 @@ nix-shell
 `nix-shell --run './launch.sh'` and `nix develop -c ./launch.sh` work too.
 The shell also provides an `applesearch` command for the packaged app.
 
-Nix compiles the reviewed glass shader during the build. Local launches compile
-it asynchronously once and cache it under `~/.cache/applesearch/shaders/`, keyed
-by its source hash; the search box appears immediately. Without `qsb` or a cached
-shader, the panel uses a translucent fallback. No precompiled binaries from
-MacShell are used.
-
-The backdrop reads the local wallpaper from hyprpaper, swww, or awww and captures
-visible windows on the active workspace, including arriving and departing workspaces. One frame per
-window is cached for resize animations; only windows intersecting the panel stream
-at a target of 60 fps while it is visible, with window positions refreshed
-at about 30 fps. Failed window exports reconnect automatically; captures are released
-and geometry polling pauses when the panel hides. An explicit local wallpaper path is also
-supported:
-
-```sh
-APPLESEARCH_WALLPAPER="$HOME/Pictures/wallpaper.jpg" ./launch.sh
-```
-
-Workspace transitions retain both departing and arriving windows. Their motion
-mirrors Hyprland's configured slide/fade style, direction, duration, and Bézier
-curve, including interrupted switches and special workspaces. Animation settings
-come from fixed, read-only `hyprctl` queries. This follows IPC events and configured
-timing; it does not receive the compositor's exact per-frame or gesture offsets.
-
-The backdrop follows Hyprland's maximized/fullscreen stacking and visibility:
-covered windows are excluded, while floating windows permitted above fullscreen
-remain visible. Restoring a window brings the underlying windows back into the capture.
-Maximize and restore interpolate the captured window's rectangle using the configured
-`windowsMove` duration and Bézier curve, with the fullscreen visibility fade and
-interrupted transitions tracked separately. Geometry metadata is retained while
-hidden so opening midway through a transition continues its remaining motion.
-The last valid window texture survives capture-stream resets during resizing;
-these frame caches are released when the panel hides.
-As with workspace transitions, timing follows IPC and animation settings rather
-than compositor-provided frame positions.
-
-The outer window and backdrop texture keep a fixed size while the card expands
-downward. The rounded input region follows the card, letting clicks through the
-unused area. Pending queries retain the previous results and result area height
-until new matches arrive or the query finishes without matches; clearing the
-query collapses it. Refraction stays at the edges without shifting the backdrop
-as the card grows.
+The outer window keeps a fixed size while the card expands downward. The
+rounded input region follows the card, letting clicks through the unused area.
+Pending queries retain the previous results and result area height until new
+matches arrive or the query finishes without matches; clearing the query
+collapses it.
 
 Searching and indexing run quietly, without progress labels or a temporary empty
 results area. A query with no previous results keeps the search box collapsed

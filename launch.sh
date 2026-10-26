@@ -16,41 +16,6 @@ setup() {
 # QML starts this asynchronously: even first-time dependency setup never blocks
 # the window from appearing. Subsequent starts go straight to the cached venv.
 case "${1:-}" in
-    --shader)
-        if [[ -n "${APPLESEARCH_GLASS_SHADER:-}" && -f "$APPLESEARCH_GLASS_SHADER" ]]; then
-            printf '%s\n' "$APPLESEARCH_GLASS_SHADER"
-            exit 0
-        fi
-        shader_hash="$(sha256sum "$project_dir/liquidglass.frag")"
-        shader_cache="${XDG_CACHE_HOME:-$HOME/.cache}/applesearch/shaders/${shader_hash%% *}"
-        shader_output="$shader_cache/liquidglass.frag.qsb"
-        if [[ -s "$shader_output" ]]; then
-            printf '%s\n' "$shader_output"
-            exit 0
-        fi
-        qsb_bin=""
-        for candidate in qsb qsb6 qsb-qt6 /usr/lib/qt6/bin/qsb /usr/lib64/qt6/bin/qsb /usr/lib/qt/bin/qsb; do
-            if command -v "$candidate" >/dev/null 2>&1; then
-                qsb_bin="$(command -v "$candidate")"
-                break
-            fi
-        done
-        if [[ -z "$qsb_bin" ]]; then
-            printf 'Liquid glass needs Qt Shader Tools (qsb); nix run . supplies it. Using the translucent fallback.\n' >&2
-            exit 1
-        fi
-        mkdir -p -m 700 "$shader_cache"
-        exec 9>"$shader_cache/compile.lock"
-        flock -x 9
-        if [[ ! -s "$shader_output" ]]; then
-            shader_temp="$(mktemp "$shader_cache/liquidglass.XXXXXX.qsb")"
-            trap 'rm -f -- "$shader_temp"' EXIT
-            "$qsb_bin" --qt6 -o "$shader_temp" "$project_dir/liquidglass.frag" >&2
-            mv -f "$shader_temp" "$shader_output"
-        fi
-        printf '%s\n' "$shader_output"
-        exit 0
-        ;;
     --backend)
         if [[ ! -x "$venv_dir/bin/python" || ! -f "$venv_dir/.applesearch-ready" ]]; then
             setup
@@ -130,7 +95,7 @@ fi
 instance_file="$instance_dir/instance-$instance_tag"
 exec 9>"$instance_dir/launch-$instance_tag.lock"
 flock -x 9
-source_hash="$(sha256sum backend.py shell.qml LiquidGlass.qml WorkspaceMotion.qml WindowMotion.qml Spring.qml Theme.qml liquidglass.frag launch.sh pyproject.toml uv.lock fonts/Geist.ttf fonts/OFL.txt | sha256sum)"
+source_hash="$(sha256sum backend.py shell.qml Spring.qml Theme.qml launch.sh pyproject.toml uv.lock fonts/Geist.ttf fonts/OFL.txt | sha256sum)"
 source_hash="${source_hash%% *}"
 
 if [[ -f "$instance_file" ]]; then
@@ -177,7 +142,7 @@ if [[ "$config_dir" != "$project_dir" ]]; then
         cp "$project_dir/fonts/$font_file" "$config_dir/fonts/$font_file.tmp"
         mv -f "$config_dir/fonts/$font_file.tmp" "$config_dir/fonts/$font_file"
     done
-    for qml_file in Theme.qml WorkspaceMotion.qml WindowMotion.qml Spring.qml LiquidGlass.qml shell.qml; do
+    for qml_file in Theme.qml Spring.qml shell.qml; do
         cp "$project_dir/$qml_file" "$config_dir/$qml_file.tmp"
         mv -f "$config_dir/$qml_file.tmp" "$config_dir/$qml_file"
     done

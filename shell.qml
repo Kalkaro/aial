@@ -1,11 +1,10 @@
 // Qt otherwise advances animations by the primary screen's frame interval,
 // which runs them too fast and unevenly on a higher refresh rate monitor.
 //@ pragma Env QSG_USE_SIMPLE_ANIMATION_DRIVER=1
-// Qt's default subpixel text antialiasing leaves colour fringes over the glass.
+// Qt's default subpixel text antialiasing leaves colour fringes on the text.
 //@ pragma Env QSG_DISTANCEFIELD_ANTIALIASING=gray
 import QtQuick
 import QtQuick.Controls
-import QtQuick.Effects
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
@@ -207,14 +206,7 @@ ShellRoot {
                                    namespace: root.namespace,
                                    font: {family: uiFont.name, ready: uiFont.status === FontLoader.Ready},
                                    theme: {source: theme.path, base00: theme.base00.toString(),
-                                           base05: theme.base05.toString(), accent: theme.base0D.toString(), dark: theme.dark},
-                                   glass: {ready: glass.ready, error: glass.shaderError,
-                                           workspace: glass.workspaceId, specialWorkspace: glass.specialWorkspaceId,
-                                           animationReady: glass.workspaceAnimationReady, animating: glass.workspaceAnimating,
-                                           windowAnimating: glass.windowAnimating,
-                                           tint: glass.tintColor.toString(),
-                                           shader: glass.shaderUrl, active: glass.active,
-                                           wallpaper: glass.wallpaperPath, windows: glass.windowCount}});
+                                           base05: theme.base05.toString(), accent: theme.base0D.toString(), dark: theme.dark}});
         }
     }
 
@@ -337,18 +329,6 @@ ShellRoot {
             Drag.onDragFinished: root.dragging = false
         }
 
-        // Analytic, so resizing the card allocates no textures.
-        RectangularShadow {
-            anchors.fill: card
-            radius: card.radius
-            offset.y: 6
-            blur: 20
-            color: "#9e000000"
-            transform: presenceScale
-            // Only visible while the glass is nearly opaque, so it never shows through.
-            opacity: Math.max(0, Math.min(1, presence.value * 2 - 0.5)) * Math.max(0, panel.fade * 3 - 2)
-        }
-
         Rectangle {
             id: card
             x: 16
@@ -356,25 +336,10 @@ ShellRoot {
             width: parent.width - 32
             height: expansion.value
             radius: 22
-            color: "transparent"
+            color: Qt.alpha(theme.base00, 0.8)
             opacity: Math.min(1, presence.value * 2) * panel.fade
             transform: presenceScale
             clip: true
-
-            LiquidGlass {
-                id: glass
-                anchors.fill: parent
-                screen: panel.screen
-                sourceDirectory: root.directory
-                palette: theme
-                active: root.opened || panel.fade > 0
-                viewportHeight: panel.implicitHeight - 36
-                screenX: (panel.screen.width - panel.width) / 2 + card.x
-                screenY: panel.margins.top + card.y
-                cornerRadius: card.radius
-                displayScale: presenceScale.xScale
-                scaleOrigin: Qt.point(presenceScale.origin.x, presenceScale.origin.y)
-            }
 
             Item {
                 id: searchRow

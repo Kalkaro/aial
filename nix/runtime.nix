@@ -5,25 +5,15 @@ let
     root = ../.;
     fileset = lib.fileset.unions [
       ../shell.qml
-      ../LiquidGlass.qml
-      ../WorkspaceMotion.qml
-      ../WindowMotion.qml
       ../Spring.qml
       ../Theme.qml
       ../fonts
-      ../liquidglass.frag
       ../backend.py
       ../launch.sh
       ../pyproject.toml
       ../uv.lock
     ];
   };
-  glassShader = pkgs.runCommand "applesearch-liquid-glass" {
-    nativeBuildInputs = [ pkgs.qt6.qtshadertools ];
-  } ''
-    mkdir -p "$out"
-    qsb --qt6 -o "$out/liquidglass.frag.qsb" ${../liquidglass.frag}
-  '';
   runtimePackages = with pkgs; [
     bash
     coreutils
@@ -47,7 +37,6 @@ let
     text = ''
       export UV_PYTHON=${pkgs.python312}/bin/python3
       export UV_PYTHON_DOWNLOADS=never
-      export APPLESEARCH_GLASS_SHADER=${glassShader}/liquidglass.frag.qsb
       export XDG_DATA_DIRS="''${XDG_DATA_DIRS:-/usr/local/share:/usr/share}:${pkgs.shared-mime-info}/share"
       export UV_PROJECT_ENVIRONMENT="''${XDG_CACHE_HOME:-$HOME/.cache}/applesearch/venv-${environmentId}"
       export LD_LIBRARY_PATH="${libraryPath}''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
@@ -64,7 +53,7 @@ in {
   inherit package;
 
   shell = pkgs.mkShellNoCC {
-    packages = runtimePackages ++ [ package pkgs.qt6.qtshadertools ];
+    packages = runtimePackages ++ [ package ];
     UV_PYTHON = "${pkgs.python312}/bin/python3";
     UV_PYTHON_DOWNLOADS = "never";
     shellHook = ''
