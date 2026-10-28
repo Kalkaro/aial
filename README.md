@@ -1,212 +1,159 @@
-# AppleSearch
+<p align="center">
+  <img src="screenshot.png" alt="The launcher with the query “fi” and four results" width="720">
+</p>
 
-A small Spotlight-style launcher for Quickshell 0.3+ on Wayland. One search box,
-an animated result list, and local **Google EmbeddingGemma 2** semantic search.
-No API keys or inference server.
+# aial
 
-The UI bundles Geist Sans for the search box, result names, and paths; no system
-font installation or runtime font download is needed. See [font provenance and license](fonts/README.md).
+A small Spotlight-style app launcher for [Quickshell](https://quickshell.org) 0.3+
+on Wayland: one search box and an animated result list. Apps are matched and
+ordered exactly like in [wave-launcher](https://github.com/Kalkaro/wave-launcher),
+whose port of rofi's drun search it uses unchanged.
+
+## Run
 
 ```sh
-./launch.sh
+nix run github:Kalkaro/aial
 ```
 
-Requires `quickshell` (`qs`), `uv`, `xdg-open`, `flock` (util-linux), and GNU
-coreutils. Install `pdftotext` (Poppler) to search PDF contents. On first launch,
-Python dependencies and the pinned model checkpoint (~1.5 GB) are downloaded in
-the background. The search box opens immediately. After setup, inference and
-search work offline.
+Without Nix, clone the repository and run `./launch.sh`. It needs `quickshell`
+(`qs`), `flock` and `setsid` (util-linux), and GNU coreutils. Nix supplies all of
+them and pins Nixpkgs in `flake.lock`, for x86-64 and ARM64 Linux.
 
-### Stylix colors
+`nix-shell` or `nix develop` enter a shell with the same tools and an
+`aial` command for the packaged app.
 
-AppleSearch reads `$XDG_CONFIG_HOME/stylix/palette.json` (default
-`~/.config/stylix/palette.json`) at runtime for both local and Nix launches.
-`base00` is the panel background, at 80% opacity; text uses `base05`,
-secondary text uses `base04`, row selection uses `base02`, and accents use `base0D`.
-Light and dark palettes are detected from `base00`.
+## Use
 
-Palette changes update the UI without restarting the model. The palette is also
-refreshed when opening the panel and every two seconds while it is visible to
-handle Nix-managed symlink replacements. Invalid colors retain their previous
-values; a default Base16 palette is used when Stylix is unavailable.
-To use a different palette file:
+Run the launcher again to toggle the panel. Escape or an outside click (on
+Hyprland) hides it. Results update as you type; clearing the query collapses the
+card. Icons come from your current icon theme.
+
+| Key | Action |
+| --- | --- |
+| ↑ / ↓ | Select a result |
+| Enter | Launch the application |
+| Escape | Hide |
+
+```sh
+./launch.sh --hidden   # start without opening
+./launch.sh --stop     # quit
+```
+
+Both work the same through `nix run . --`. The checkout and Nix launchers share
+one resident instance per display and namespace, and launching changed source
+restarts it with the updated code.
+
+For a Hyprland shortcut, use your absolute project path:
+
+```ini
+bind = SUPER, SPACE, exec, /path/to/aial/launch.sh
+exec-once = /path/to/aial/launch.sh --hidden
+```
+
+Applications start through `systemd-run --user` when it is available, with the
+session's environment rather than the launcher's, in their own unit; their
+output goes to the user journal. Terminal applications open in `$TERMINAL`,
+`xdg-terminal-exec`, or the first installed of kitty, foot, Alacritty, WezTerm,
+Ghostty, Konsole, GNOME Terminal, Console, Xfce Terminal, or xterm.
+
+### Namespaces
+
+`-n` or `--namespace` sets the Wayland layer namespace, default `applesearch`:
+
+```sh
+./launch.sh -n 123
+./launch.sh --namespace 123 --hidden
+./launch.sh -n 123 --stop
+```
+
+Each name has an independent panel; toggle, `--hidden`, and `--stop` affect only
+the selected namespace. The launch history is shared. Use the namespace in
+compositor layer rules to target that panel.
+
+## Search
+
+Apps come from the desktop entries Quickshell finds in your XDG data
+directories, except hidden and `NoDisplay` ones. They are searched by
+wave-launcher's `rofi-search.js`, copied byte for byte, with wave-launcher's
+default settings: rofi's drun defaults, plus its name-first order and
+keyboard-layout matching.
+
+- Every word typed must appear, ignoring case, in an app's name, generic name,
+  Exec line, categories, or keywords. A word starting with `-` excludes the
+  apps it matches. Words typed in the Russian keyboard layout also match the
+  English letters on the same keys, so `ашкуащч` finds Firefox.
+- Apps matching every word by name come first, then those that need the
+  generic name, keywords, categories, and lastly the Exec line. Within each
+  group, recently launched apps come first, most recent first, then the rest
+  alphabetically.
+
+Each launch is recorded in rofi's drun history format in
+`$XDG_CACHE_HOME/applesearch.druncache` (default `~/.cache/applesearch.druncache`),
+which keeps the last 25 apps. Seven results fit at a time; the arrow keys and
+the mouse wheel scroll through the rest.
+
+## Clipboard history
+
+Lines piped into the launcher turn the panel into a dmenu-style picker, like
+`rofi -dmenu -display-columns 2`. With [cliphist](https://github.com/sentriz/cliphist),
+that makes a clipboard history:
+
+```ini
+bind = SUPER, V, exec, cliphist list | /path/to/aial/launch.sh | cliphist decode | wl-copy
+```
+
+The picker has no search field. It lists the lines in their order, so
+cliphist's stay newest first, with the first one selected. The arrow keys and
+the mouse wheel move through them. Enter or a click prints the chosen line;
+Escape, or hiding the panel any other way, prints nothing and exits with
+status 1. A line shows the text after its first tab, so cliphist's
+`id<TAB>preview` lines show just the preview. Seven rows fit at a time, and the
+first 100 lines are listed.
+
+Copied images show as thumbnails: before the menu opens, `launch.sh` runs
+`cliphist decode` on each image among those lines. An image in a format Qt
+can't read, such as TIFF, keeps a plain image icon.
+
+`launch.sh` hands the lines and images to the panel in a folder only you can
+read, under `$XDG_RUNTIME_DIR/applesearch`, and deletes it when the menu closes.
+
+## Colors
+
+The launcher reads `$XDG_CONFIG_HOME/stylix/palette.json` (default
+`~/.config/stylix/palette.json`) at runtime. `base00` is the panel background, at
+80% opacity; text uses `base05`, secondary text uses `base04`, row selection
+uses `base02`, and accents use `base0D`. Light and dark palettes are detected
+from `base00`.
+
+Palette changes update the UI without a restart. The palette is also refreshed
+when opening the panel and every two seconds while it is visible, to handle
+Nix-managed symlink replacements. Invalid colors keep their previous values; a
+default Base16 palette is used when Stylix is unavailable. To use a different
+palette file:
 
 ```sh
 APPLESEARCH_PALETTE="$HOME/.config/my-colors.json" ./launch.sh
 ```
 
-### Nix
-
-```sh
-nix run .
-```
-
-Or enter the development environment and use the local launcher:
-
-```sh
-nix-shell
-./launch.sh
-```
-
-`nix-shell --run './launch.sh'` and `nix develop -c ./launch.sh` work too.
-The shell also provides an `applesearch` command for the packaged app.
-
-The outer window keeps a fixed size while the card expands downward. The
-rounded input region follows the card, letting clicks through the unused area.
-Pending queries retain the previous results and result area height until new
-matches arrive or the query finishes without matches; clearing the query
-collapses it.
-
-Searching and indexing run quietly, without progress labels or a temporary empty
-results area. A query with no previous results keeps the search box collapsed
-until matches arrive or the completed search has no results. Errors remain visible.
-
-Documents use file-type icons from your current system icon theme, just like
-applications (PDFs, office documents, images, archives, and source files). Unknown
-types fall back to the theme's generic document icon. Existing cached results pick
-up their icons without rebuilding the search index.
-
-Nix supplies Quickshell, Python, uv, GLib, Poppler, xdg-utils, and the native
-libraries required by the CPU wheels. It pins Nixpkgs in `flake.lock`; both shell
-entry points use that pin. The first launch still installs the locked Python
-packages and downloads the model. With `nix run`, the Python environment lives
-under `$XDG_CACHE_HOME/applesearch/venv-*` (default `~/.cache/applesearch/venv-*`),
-so the Nix store stays read-only. Model weights and the search index are shared
-with the local launcher. The flake defines x86-64 and ARM64 Linux outputs.
-
-```sh
-nix run . -- --hidden
-nix run . -- --stop
-```
-
-Run `./launch.sh` again to toggle the existing panel. Escape or an outside click
-(on Hyprland) hides it while keeping the model warm. Use `./launch.sh --stop` to
-quit and release its memory; `./launch.sh --hidden` starts it without opening.
-The checkout and Nix launchers share one resident instance per display and namespace, so
-switching between them reuses the loaded model. `--stop` from either launcher
-stops that instance. Launching changed source restarts it with the updated code.
-
-Set a custom Wayland layer namespace with `-n` or `--namespace`:
-
-```sh
-./launch.sh -n 123
-nix run . -- -n 123
-./launch.sh --namespace 123 --hidden
-./launch.sh -n 123 --stop
-```
-
-The default is `applesearch`. Each name has an independent panel and loaded model;
-toggle, `--hidden`, and `--stop` affect only the selected namespace. Model weights
-and the on-disk search cache are shared. Use the namespace in compositor layer
-rules to target that panel.
-
-| Key | Action |
-| --- | --- |
-| ↑ / ↓ | Select a result |
-| Enter | Launch application / open file |
-| Ctrl+Enter | Open its containing folder |
-| Escape | Hide |
-| Ctrl+R | Refresh the index |
-
-Applications and files start through `systemd-run --user` when it is available,
-with the session's environment rather than AppleSearch's, in their own unit;
-their output goes to the user journal. Terminal applications open in `$TERMINAL`,
-`xdg-terminal-exec`, or the first installed of kitty, foot, Alacritty, WezTerm,
-Ghostty, Konsole, GNOME Terminal, Console, Xfce Terminal, or xterm.
-
-For a Hyprland shortcut, add your absolute project path to your config:
-
-```ini
-bind = SUPER, SPACE, exec, /path/to/applesearch/launch.sh
-exec-once = /path/to/applesearch/launch.sh --hidden
-```
-
-## Search and cache
-
-Applications come from XDG application directories. Files come from your XDG
-Documents, Downloads, Desktop, and Pictures folders. Names and paths are indexed
-for all ordinary files; text/code and the first four pages of PDFs also contribute
-content. Images and other binary formats currently use their names and paths.
-
-The local index and up to 256 query embeddings live in
-`~/.cache/applesearch/index.sqlite3` (or `$XDG_CACHE_HOME/applesearch`). Model weights
-use the standard Hugging Face cache. Reopening the panel reuses the running
-process; restarting reads the existing SQLite index immediately and warms the
-model on a separate thread. Keyword matches appear first, then semantic matches.
-Exact names retain priority. Files and queries are never sent to a service.
-Prepared search metadata and the last 128 ranked queries stay in memory; index
-changes invalidate the relevant caches. The input debounce is 25 ms. Background
-document embeddings pause while the panel is open so queries get the model to
-themselves, then resume when it hides. Background work uses one-document batches
-to reduce the wait for an in-flight batch when opening the panel.
-Folder names and explicit sequence numbers also take priority: `second asd`,
-`2nd asd`, and `2 asd` select the file prefixed `02` inside an `ASD` folder,
-even before its embedding is ready. Unrelated semantic matches are omitted
-when a folder and file number identify a specific document.
-
-Asking for the newest files lists them by modification time, newest first, with
-the time after the folder: `last screenshot`, `latest pdf in downloads`,
-`last 3 photos`, or just `recent`. Photo/image, video, song/music, document, and
-archive match files of that type anywhere; other words match the start of a word
-in a file's name or folders, so `download` covers `~/Downloads` and `screenshot`
-covers a Screenshots folder and grim or hyprshot file names. A name containing
-the whole query, like The Last of Us, stays on top. When no file fits the
-words, the query is searched as usual.
-
-Indexing runs incrementally in the background and checks for changes every two
-minutes. Opening the panel also refreshes right away if a file was added,
-removed, or renamed in an indexed folder, so a screenshot taken a moment ago
-is already there. Unchanged files retain their vectors. The text-only model uses float32
-on CPU and normalized 256-dimensional embeddings. Background batches yield to
-new queries. Initial indexing can take a while on a large collection.
-
-Optional environment settings, applied when starting a new instance:
-
-```sh
-APPLESEARCH_PATHS="$HOME/Notes:$HOME/Documents" ./launch.sh
-APPLESEARCH_THREADS=2 ./launch.sh --hidden
-APPLESEARCH_EXCLUDE_PATHS="$HOME/Documents/Archive:$HOME/Downloads/installers" ./launch.sh
-```
-
-`APPLESEARCH_PATHS` is a colon-separated list of folders (empty means apps only).
-`APPLESEARCH_CACHE_DIR` overrides the index location. `APPLESEARCH_MAX_ITEMS`
-defaults to 10,000 files, split evenly between the folders so a large one cannot
-push out the others; a folder that needs fewer leaves the rest to the others.
-Traversal stops after six directory levels and skips
-hidden paths, symlinks, dependency folders, and build outputs.
-Copied Firefox/Chromium profiles, Python environments, extracted Electron
-or `.app` bundles, and Minecraft servers and worlds are also excluded.
-
-To exclude other folders, list them one per line in
-`$XDG_CONFIG_HOME/applesearch/exclude` (default `~/.config/applesearch/exclude`).
-Lines starting with `#` are comments. The file is re-read on every refresh, so
-edits apply within two minutes, or immediately with Ctrl+R:
-
-```sh
-# ~/.config/applesearch/exclude
-~/Documents/Archive
-~/Downloads/installers
-```
-
-`APPLESEARCH_EXCLUDE_PATHS` adds more, separated by colons. Both take absolute or
-`~`-prefixed directory paths; each excludes its descendants.
-Exclusions apply to the whole index, including filename matches. A refresh removes
-previously cached entries in excluded folders while preserving other embeddings.
-
 ## Development
 
 ```sh
-./launch.sh --setup
-.venv/bin/python -m unittest discover -s tests -v
-.venv/bin/python tests/integration.py  # real model, offline cache/restart check
+node --test tests/test_rofi_search.js
+python3 -m unittest discover -s tests -v
 qs log -p . --no-color -t 50
 qs ipc -p . call spotlight state
-qs ipc -p . call spotlight search 'something to read'
+qs ipc -p . call spotlight search firefox
 ```
 
 QML reloads automatically when edited in the default namespace. For custom
-namespaces, rerun the launcher to apply edits. Restart the instance after changing
-`backend.py` or environment settings. To update dependencies after changing
-`pyproject.toml`, run `uv lock` followed by `./launch.sh --setup`.
+namespaces, rerun the launcher to apply edits.
 
-Model reference: [EmbeddingGemma 2 model card](https://ai.google.dev/gemma/docs/embeddinggemma/model_card_2).
+`rofi-search.js` and `tests/test_rofi_search.js` are copies of wave-launcher's;
+update them there and copy them over rather than editing them here.
+
+## License
+
+[MIT](LICENSE). The search logic is ported from
+[Rofi](https://github.com/davatorium/rofi) (MIT, see
+[licenses/rofi-MIT.txt](licenses/rofi-MIT.txt)). The bundled Geist Sans is under
+the SIL Open Font License; see [fonts/README.md](fonts/README.md).
