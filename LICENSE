@@ -19,17 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
----
-
-Third-party components bundled with this project:
-
-1. Rofi drun search logic (rofi-search.js)
-   Source: https://github.com/davatorium/rofi
-   License: MIT
-   See licenses/rofi-MIT.txt
-
-2. Geist Sans (fonts/Geist.ttf)
-   Source: https://github.com/vercel/geist-font
-   License: SIL Open Font License 1.1
-   See fonts/OFL.txt and fonts/README.md
