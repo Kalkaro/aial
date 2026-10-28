@@ -1,5 +1,5 @@
 {
-  description = "Local EmbeddingGemma 2 Spotlight for Quickshell";
+  description = "Spotlight-style application launcher for Quickshell";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
@@ -13,14 +13,14 @@
     in {
       packages = forEachSystem (system: {
         default = (runtimeFor system).package;
-        applesearch = (runtimeFor system).package;
+        aial = (runtimeFor system).package;
       });
 
       apps = forEachSystem (system: {
         default = {
           type = "app";
-          program = "${(runtimeFor system).package}/bin/applesearch";
-          meta.description = "Open the local Spotlight search panel";
+          program = "${(runtimeFor system).package}/bin/aial";
+          meta.description = "Open the Spotlight-style launcher panel";
         };
       });
 

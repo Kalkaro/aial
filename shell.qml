@@ -8,7 +8,9 @@ import QtQuick.Controls
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
+import Quickshell.Widgets
 import Quickshell.Hyprland
+import "rofi-search.js" as RofiSearch
 
 ShellRoot {
     id: root
@@ -17,39 +19,108 @@ ShellRoot {
     FontLoader { id: uiFont; source: "fonts/Geist.ttf" }
 
     property bool opened: Quickshell.env("APPLESEARCH_HIDDEN") !== "1"
-    property bool backendReady: false
-    property string phase: "loading"
-    property string statusMessage: "Preparing local search…"
     property var results: []
-    property int requestId: 0
     property int selected: 0
     property bool selectionExplicit: false
     property var hoverPosition: null
-    property bool dragging: false
-    property bool searching: false
-    property bool semantic: false
-    property int resultsHeight: 0
-    property double queryStartedMs: 0
-    property double firstResultMs: -1
+    // Lines piped to launch.sh, which waits at menuResult for the one picked, dmenu style.
+    property var menuEntries: []
+    property string menuResult: ""
+    readonly property bool menuMode: menuEntries.length > 0
     property var targetScreen: Quickshell.screens[0]
     readonly property string namespace: Quickshell.env("APPLESEARCH_NAMESPACE") || "applesearch"
     readonly property string directory: Quickshell.env("APPLESEARCH_SOURCE_DIR") || decodeURIComponent(Qt.resolvedUrl(".").toString().replace(/^file:\/\//, "").replace(/\/$/, ""))
-    readonly property bool hasQuery: input.text.trim().length > 0
+    // A menu has no search field, so its lines start at the top of the card.
+    readonly property int searchHeight: menuMode ? 0 : 72
+    // Seven rows fit; a longer list scrolls. Without results only the search row shows.
+    readonly property int resultsHeight: results.length ? Math.min(results.length, 7) * 62 + 16 : 0
     readonly property bool isHyprland: Quickshell.env("HYPRLAND_INSTANCE_SIGNATURE").length > 0
     // Result names stay dimmer until selected, then move toward white (black on light palettes).
     readonly property color titleColor: Qt.alpha(theme.base05, 0.8)
     readonly property color selectedTitleColor: Qt.tint(theme.base05, theme.dark ? "#80ffffff" : "#80000000")
-    onOpenedChanged: {
-        hoverPosition = null;
-        if (backendReady)
-            backend.write(JSON.stringify({action: "active", value: opened}) + "\n");
+    onOpenedChanged: hoverPosition = null
+
+    // Apps are searched as in wave-launcher: the same entries, its port of
+    // rofi's drun matching and order, and its default settings.
+    property int appReloadCounter: 0
+    Connections {
+        target: DesktopEntries
+        function onApplicationsChanged() {
+            root.appReloadCounter++;
+        }
+    }
+    readonly property var applications: {
+        root.appReloadCounter;
+        let entries = Array.from(DesktopEntries.applications.values);
+        return entries.filter((entry, index, all) =>
+            !entry.noDisplay && index === all.findIndex(candidate => candidate.id === entry.id));
+    }
+    readonly property var preparedApplications: applications.map(entry => RofiSearch.prepareApplication(entry))
+    // Apps installed or removed while a query is open update its results.
+    onPreparedApplicationsChanged: if (!menuMode) matchApps()
+
+    // Launches are recorded in rofi's drun history format, which lists recently
+    // launched apps first. Panels in other namespaces share the file.
+    property var drunHistory: ({})
+    FileView {
+        id: drunCache
+        path: (Quickshell.env("XDG_CACHE_HOME") || Quickshell.env("HOME") + "/.cache") + "/applesearch.druncache"
+        blockLoading: true
+        watchChanges: true
+        printErrors: false
+        onLoaded: root.drunHistory = RofiSearch.parseDrunHistory(text())
+        onFileChanged: reload()
+    }
+
+    function searchApplications(text) {
+        if (text.trim().length === 0)
+            return [];
+        return RofiSearch.search(text, preparedApplications, {
+            matchingMethod: "normal",
+            normalizeMatch: false,
+            sort: false,
+            sortingMethod: "normal",
+            matchFieldsSpec: "name,generic,exec,categories,keywords",
+            drunHistory: drunHistory,
+            useDrunHistory: true,
+            preferNameMatch: true
+        });
+    }
+
+    function matchApps() {
+        // A row picked with the keys or pointer stays selected if it is still listed.
+        let previous = selectionExplicit && selected >= 0 && selected < results.length ? results[selected].id : "";
+        results = searchApplications(input.text).map(entry => ({id: entry.id, title: entry.name, kind: "app",
+                                                                 icon: entry.icon, entry: entry}));
+        let same = results.findIndex(result => result.id === previous);
+        selected = Math.max(0, same);
+        selectionExplicit = same >= 0;
+    }
+
+    function launch(entry) {
+        let history = RofiSearch.recordDrunLaunch(drunCache.text(), entry.id);
+        drunCache.setText(history);
+        drunHistory = RofiSearch.parseDrunHistory(history);
+        hidePanel();
+        // launch.sh starts the app in its own systemd unit, with the session's
+        // environment rather than Quickshell's, and in a terminal if it asks for one.
+        let options = entry.runInTerminal ? ["--terminal"] : [];
+        if (entry.workingDirectory)
+            options.push("--directory", entry.workingDirectory);
+        Quickshell.execDetached([directory + "/launch.sh", "--run", ...options, "--", ...Array.from(entry.command)]);
     }
 
     function showPanel() {
         theme.refresh();
+        if (menuMode) {
+            // A search replaces a menu, even one still fading out.
+            answerMenu(null);
+            resetPanel();
+        }
         if (panel.visible) {
-            // Reopening during the close fade reverses it and keeps the query.
-            requestSearch();
+            // Reopening during the close fade reverses it and keeps the query. A
+            // launch that closed the panel may have reordered its results.
+            matchApps();
         } else {
             targetScreen = Quickshell.screens.find(s => s.name === Hyprland.focusedMonitor?.name) || Quickshell.screens[0];
             input.text = "";
@@ -64,43 +135,69 @@ ShellRoot {
     }
 
     function hidePanel() {
+        // Hiding without picking a line cancels a menu.
+        answerMenu(null);
         // Focus returns immediately; the card fades out with its content.
         opened = false;
         panel.fade = 0;
         grab.active = false;
         focusTimer.stop();
-        debounce.stop();
-        // Results still in flight must not resize the closing card.
-        ++requestId;
     }
 
     // Runs once the close animation has hidden the window.
     function resetPanel() {
+        menuEntries = [];
         input.text = "";
+        // A menu's text is always empty, so clearing it leaves the lines.
         results = [];
-        ++requestId;
-        if (backendReady)
-            backend.write(JSON.stringify({action: "search", id: requestId, query: ""}) + "\n");
     }
 
-    function requestSearch() {
-        if (backendReady)
-            backend.write(JSON.stringify({action: "search", id: requestId, query: input.text}) + "\n");
+    // A menu has no search: it lists the lines in their order, so clipboard
+    // history stays newest first.
+    function showMenu(lines, result, images) {
+        // Replaces a search, or a menu still waiting for its answer.
+        showPanel();
+        input.text = "";
+        menuResult = result;
+        // The rows are all built at once, so a huge input lists only its first 100 lines.
+        menuEntries = lines.slice(0, 100).map(line => menuEntry(line, images));
+        results = menuEntries;
+        selected = 0;
+        selectionExplicit = false;
+        hoverPosition = null;
     }
 
-    function updateResultsHeight() {
-        if (!hasQuery)
-            resultsHeight = 0;
-        else if (results.length)
-            resultsHeight = results.length * 62 + (phase === "error" ? 43 : 16);
-        else if (!searching && (backendReady && phase !== "loading" || phase === "error"))
-            resultsHeight = 62;
-        // Keep the current height while the next query's results are pending.
+    // Like rofi -display-columns 2, a line shows the column after its first
+    // tab, so cliphist's "id<TAB>preview" lines show just the preview.
+    function menuEntry(line, images) {
+        let columns = line.split("\t");
+        let title = columns.length > 1 ? columns[1] : line;
+        // cliphist lists a copied image as "id<TAB>[[ binary data 2 MiB png 1920x1080 ]]".
+        // launch.sh decodes it into the images folder, in a file named by its id.
+        let image = columns.length === 2 && /^\d+$/.test(columns[0]) && /^\[\[ binary data .* \d+x\d+ \]\]$/.test(title);
+        return {title: title, kind: "line", line: line, icon: image ? "image-x-generic" : "text-x-generic",
+                image: image && images ? fileUrl(images + "/" + columns[0]) : ""};
     }
 
-    function activate(reveal) {
-        if (results.length && selected >= 0 && selected < results.length)
-            backend.write(JSON.stringify({action: "open", id: results[selected].id, reveal: reveal}) + "\n");
+    // Tells launch.sh which line was picked, once; null cancels the menu.
+    function answerMenu(line) {
+        if (!menuResult)
+            return;
+        let file = menuFile.createObject(root, {path: menuResult, preload: false});
+        file.setText(line === null ? "cancelled\n" : "selected\n" + line + "\n");
+        file.destroy();
+        menuResult = "";
+    }
+
+    function activate() {
+        if (!results.length || selected < 0 || selected >= results.length)
+            return;
+        if (menuMode) {
+            answerMenu(results[selected].line);
+            hidePanel();
+        } else {
+            launch(results[selected].entry);
+        }
     }
 
     function fileUrl(path) {
@@ -111,13 +208,6 @@ ShellRoot {
         let fallback = result.kind === "app" ? "application-x-executable" : "text-x-generic";
         let icon = result.icon || fallback;
         return icon.startsWith("/") ? fileUrl(icon) : Quickshell.iconPath(icon, fallback);
-    }
-
-    function dragResult(result) {
-        dragSource.result = result;
-        // QDrag::exec() blocks in a nested event loop. Starting it outside the
-        // row's event handling lets results be rebuilt while a drag is running.
-        Qt.callLater(() => dragSource.Drag.active = true);
     }
 
     function selectResult(index) {
@@ -134,54 +224,31 @@ ShellRoot {
             selectResult(index);
     }
 
-    function receive(message) {
-        if (message.type === "ready") {
-            backendReady = true;
-            backend.write(JSON.stringify({action: "active", value: opened}) + "\n");
-            if (hasQuery)
-                requestSearch();
-        } else if (message.type === "status") {
-            phase = message.phase;
-            statusMessage = message.message;
-            if (phase === "error") {
-                searching = false;
-            }
-            updateResultsHeight();
-        } else if (message.type === "results" && message.id === requestId) {
-            // A slower lexical response must never replace semantic results.
-            if (semantic && !message.semantic)
-                return;
-            // Empty keyword results are provisional while semantic search runs.
-            // Keep the displayed rows until this query has results or finishes.
-            if (message.results.length > 0 || !message.searching) {
-                let previous = selectionExplicit && selected >= 0 && selected < results.length ? results[selected].id : "";
-                results = message.results;
-                if (results.length > 0 && firstResultMs < 0)
-                    firstResultMs = Date.now() - queryStartedMs;
-                let same = results.findIndex(r => r.id === previous);
-                selected = Math.max(0, same);
-                selectionExplicit = same >= 0;
-            }
-            semantic = message.semantic;
-            searching = message.searching;
-            updateResultsHeight();
-        } else if (message.type === "index" && hasQuery) {
-            requestSearch();
-        } else if (message.type === "opened") {
-            hidePanel();
-        } else if (message.type === "error") {
-            statusMessage = message.message;
-            searching = false;
-            updateResultsHeight();
-        }
-    }
-
     Component.onCompleted: {
+        drunHistory = RofiSearch.parseDrunHistory(drunCache.text());
         targetScreen = Quickshell.screens.find(s => s.name === Hyprland.focusedMonitor?.name) || Quickshell.screens[0];
         if (opened) {
             presence.value = 0;
             focusTimer.start();
         }
+    }
+
+    // Seven rows fit; a longer list scrolls to keep the selected one in view.
+    onSelectedChanged: {
+        let top = Math.min(Math.max(scroll.target, (selected - 6) * 62), selected * 62);
+        scroll.target = Math.max(0, Math.min(top, (results.length - 7) * 62));
+    }
+    onResultsChanged: {
+        scroll.target = 0;
+        scroll.settle();
+    }
+
+    // launch.sh hands a menu its lines in one file and waits for the answer in
+    // another. Each file gets a new FileView: after a path change, one still
+    // returns the last file's text and skips writing text it wrote before.
+    Component {
+        id: menuFile
+        FileView { blockLoading: true; blockWrites: true; atomicWrites: true; printErrors: false }
     }
 
     IpcHandler {
@@ -192,53 +259,43 @@ ShellRoot {
         function quit(): void { Qt.quit(); }
         function processId(): int { return Quickshell.processId; }
         function search(query: string): void {
-            if (!root.opened)
+            if (!root.opened || root.menuMode)
                 root.showPanel();
             input.text = query;
         }
+        // Returns this process ID, which launch.sh watches in case the
+        // instance stops before answering.
+        function showMenu(linesPath: string, resultPath: string, imagesPath: string): int {
+            let file = menuFile.createObject(root, {path: linesPath});
+            let lines = file.text().split(/\r?\n/);
+            file.destroy();
+            // The final line break does not start another line.
+            if (lines[lines.length - 1] === "")
+                lines.pop();
+            root.showMenu(lines, resultPath, imagesPath);
+            return Quickshell.processId;
+        }
         function state(): string {
-            return JSON.stringify({visible: root.opened, query: input.text, results: root.results,
-                                   selected: root.selected,
-                                   phase: root.phase, semantic: root.semantic, searching: root.searching,
+            return JSON.stringify({visible: root.opened, query: input.text, apps: root.applications.length,
+                                   results: root.results.map(result => ({id: result.id, title: result.title, kind: result.kind,
+                                                                         icon: result.icon, line: result.line,
+                                                                         image: result.image})),
+                                   selected: root.selected, menu: root.menuMode, scroll: scroll.target,
                                    height: card.height + 36, surfaceHeight: panel.height,
-                                   ready: root.backendReady, message: root.statusMessage,
-                                   screen: panel.screen.name, firstResultMs: root.firstResultMs,
-                                   namespace: root.namespace,
+                                   screen: panel.screen.name, namespace: root.namespace,
                                    font: {family: uiFont.name, ready: uiFont.status === FontLoader.Ready},
                                    theme: {source: theme.path, base00: theme.base00.toString(),
                                            base05: theme.base05.toString(), accent: theme.base0D.toString(), dark: theme.dark}});
         }
     }
 
-    Process {
-        id: backend
-        command: [root.directory + "/launch.sh", "--backend"]
-        running: true
-        stdinEnabled: true
-        stdout: SplitParser {
-            onRead: data => {
-                try { root.receive(JSON.parse(data)); }
-                catch (error) { console.warn("AppleSearch: " + error); }
-            }
-        }
-        stderr: SplitParser { onRead: data => console.log("AppleSearch: " + data) }
-        onExited: (exitCode, exitStatus) => {
-            root.backendReady = false;
-            root.phase = "error";
-            root.searching = false;
-            root.updateResultsHeight();
-            root.statusMessage = "Local search stopped · see Quickshell logs";
-        }
-    }
-
-    Timer { id: debounce; interval: 25; onTriggered: root.requestSearch() }
     // Nix may replace a palette symlink without changing the watched target.
     Timer { interval: 2000; repeat: true; running: root.opened; onTriggered: theme.refresh() }
     Timer {
         id: focusTimer
         interval: 30
         onTriggered: {
-            input.forceActiveFocus();
+            (root.menuMode ? navigation : input).forceActiveFocus();
             if (root.isHyprland)
                 grab.active = true;
         }
@@ -247,9 +304,8 @@ ShellRoot {
     PanelWindow {
         id: panel
         screen: root.targetScreen
-        // Stays mapped until the close fade ends, and until a drag started
-        // from it ends, so the drag is not cancelled.
-        visible: root.opened || fade > 0 || root.dragging
+        // Stays mapped until the close fade ends.
+        visible: root.opened || fade > 0
         onVisibleChanged: if (!visible) root.resetPanel()
         // Closing fades the card out in place; reopening fades it back in.
         property real fade: root.opened ? 1 : 0
@@ -263,7 +319,7 @@ ShellRoot {
         margins.top: Math.min(Math.round(screen.height * 0.22), Math.max(0, screen.height - implicitHeight))
         implicitWidth: Math.min(680, screen.width - 48)
         // Keep the Wayland surface stable; only the card inside it animates.
-        implicitHeight: Math.min(72 + 7 * 62 + 43 + 36, screen.height)
+        implicitHeight: Math.min(72 + 7 * 62 + 16 + 36, screen.height)
         // Clicks pass through as soon as the panel starts closing.
         mask: Region { item: root.opened ? card : null; radius: card.radius }
         exclusionMode: ExclusionMode.Ignore
@@ -280,7 +336,7 @@ ShellRoot {
         // A new result count redirects the motion without restarting it.
         Spring {
             id: expansion
-            target: Math.min(72 + root.resultsHeight, panel.implicitHeight - 36)
+            target: Math.min(root.searchHeight + root.resultsHeight, panel.implicitHeight - 36)
             enabled: panel.visible
         }
 
@@ -300,6 +356,12 @@ ShellRoot {
             response: 0.1
             enabled: panel.visible
         }
+        // A long list scrolls with the same motion, so the highlight moves with its row.
+        Spring {
+            id: scroll
+            response: 0.1
+            enabled: panel.visible
+        }
 
         Scale {
             id: presenceScale
@@ -307,26 +369,6 @@ ShellRoot {
             origin.y: searchRow.height / 2
             xScale: 0.9 + 0.1 * presence.value
             yScale: xScale
-        }
-
-        // Hands a dragged result's file to other apps. Copy only, so a file
-        // manager never moves the original out of place.
-        Item {
-            id: dragSource
-            property var result: null
-            Drag.dragType: Drag.Automatic
-            Drag.supportedActions: Qt.CopyAction
-            Drag.proposedAction: Qt.CopyAction
-            Drag.mimeData: result ? {"text/uri-list": [root.fileUrl(result.id)], "text/plain": result.id} : ({})
-            Drag.imageSource: result ? root.iconUrl(result) : ""
-            Drag.imageSourceSize: Qt.size(48, 48)
-            Drag.hotSpot: Qt.point(24, 24)
-            // The panel closes as the drag begins, getting out of the way of drop targets.
-            Drag.onDragStarted: {
-                root.dragging = true;
-                root.hidePanel();
-            }
-            Drag.onDragFinished: root.dragging = false
         }
 
         Rectangle {
@@ -345,6 +387,7 @@ ShellRoot {
                 id: searchRow
                 width: parent.width
                 height: 72
+                visible: !root.menuMode
 
                 Item {
                     x: 24
@@ -375,75 +418,86 @@ ShellRoot {
                     font.pixelSize: 24
                     font.weight: Font.Normal
                     color: theme.base05
-                    placeholderText: "Search anything"
+                    placeholderText: "Search apps"
                     placeholderTextColor: Qt.alpha(theme.base05, 0.65)
                     selectionColor: theme.base0D
                     selectedTextColor: theme.base00
                     background: Item {}
                     focus: true
                     selectByMouse: true
-                    Accessible.name: "Search applications and files"
+                    Accessible.name: "Search applications"
                     onTextChanged: {
-                        root.queryStartedMs = Date.now();
-                        root.firstResultMs = -1;
-                        ++root.requestId;
-                        root.semantic = false;
-                        root.searching = root.hasQuery;
                         root.selected = 0;
                         root.selectionExplicit = false;
                         root.hoverPosition = null;
-                        if (!root.hasQuery) {
-                            root.results = [];
-                        }
-                        root.updateResultsHeight();
-                        debounce.restart();
+                        root.matchApps();
                     }
-                    Keys.onEscapePressed: root.hidePanel()
-                    Keys.onDownPressed: event => {
-                        if (root.results.length)
-                            root.selectResult((root.selected + 1) % root.results.length);
-                        event.accepted = true;
-                    }
-                    Keys.onUpPressed: event => {
-                        if (root.results.length)
-                            root.selectResult((root.selected + root.results.length - 1) % root.results.length);
-                        event.accepted = true;
-                    }
-                    Keys.onReturnPressed: event => root.activate((event.modifiers & Qt.ControlModifier) !== 0)
-                    Keys.onEnterPressed: event => root.activate((event.modifiers & Qt.ControlModifier) !== 0)
-                    Keys.onPressed: event => {
-                        if (event.key === Qt.Key_R && (event.modifiers & Qt.ControlModifier)) {
-                            if (root.backendReady)
-                                backend.write(JSON.stringify({action: "refresh"}) + "\n");
-                            event.accepted = true;
-                        }
-                    }
+                    Keys.forwardTo: [navigation]
                 }
 
+            }
+
+            // Moves through the results and picks one. The search field passes its
+            // keys here first; a menu, which has no search field, focuses this instead.
+            Item {
+                id: navigation
+                Keys.onEscapePressed: root.hidePanel()
+                // Like the wheel, the keys stop at the first and last rows.
+                Keys.onDownPressed: event => {
+                    if (root.results.length)
+                        root.selectResult(Math.min(root.selected + 1, root.results.length - 1));
+                    event.accepted = true;
+                }
+                Keys.onUpPressed: event => {
+                    if (root.results.length)
+                        root.selectResult(Math.max(root.selected - 1, 0));
+                    event.accepted = true;
+                }
+                Keys.onReturnPressed: root.activate()
+                Keys.onEnterPressed: root.activate()
             }
 
             Rectangle {
                 x: 20; y: 72
                 width: parent.width - 40; height: 1
                 color: Qt.alpha(theme.base05, 0.09)
-                visible: root.hasQuery
+                visible: searchRow.visible && root.results.length > 0
             }
 
             Item {
                 x: 8
-                y: 80
+                y: root.searchHeight + 8
                 width: parent.width - 16
                 // Keep rows inside the rounded corners while the card grows.
                 height: Math.max(0, card.height - y - 8)
                 clip: true
-                visible: root.hasQuery && root.results.length > 0
+                visible: root.results.length > 0
+
+                // As in rofi, the wheel moves the selection through a long list.
+                WheelHandler {
+                    property real travel: 0
+                    target: null
+                    // Touchpads scroll too, and Qt reports some mouse wheels as one.
+                    acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                    onWheel: event => {
+                        travel += event.angleDelta.y;
+                        let steps = Math.trunc(travel / 120);
+                        travel -= steps * 120;
+                        if (steps)
+                            root.selectResult(Math.max(0, Math.min(root.results.length - 1, root.selected - steps)));
+                    }
+                }
 
                 // One highlight moves between the rows, drawn beneath them.
+                // Rows past the seventh scroll up from under the clip.
                 Rectangle {
-                    y: selection.value
+                    y: selection.value - scroll.value
                     width: parent.width
-                    height: 62
-                    radius: 10
+                    // Stops at the bottom of the rows shown, so while the card grows its
+                    // corners there stay round instead of being cut off.
+                    height: Math.max(0, Math.min(62, parent.height - y))
+                    // Concentric with the card's corners, which are 8 px further out.
+                    radius: card.radius - 8
                     color: Qt.alpha(theme.base02, 0.26)
                 }
 
@@ -454,8 +508,10 @@ ShellRoot {
                         required property var modelData
                         required property int index
                         // 1 under the highlight, 0 a row away, so the name brightens as it arrives.
-                        readonly property real lit: Math.max(0, 1 - Math.abs(selection.value - y) / height)
-                        y: index * 62
+                        readonly property real lit: Math.max(0, 1 - Math.abs(selection.value - index * 62) / height)
+                        // In the seven rows shown, or scrolling into them.
+                        readonly property bool inView: y + height > 0 && y < 7 * 62
+                        y: index * 62 - scroll.value
                         width: card.width - 16
                         height: 62
 
@@ -463,11 +519,15 @@ ShellRoot {
                             id: resultIcon
                             x: 16; y: 14
                             width: 32; height: 32
-                            source: root.iconUrl(resultRow.modelData)
+                            // One letter can match dozens of apps. Loading all their icons at once,
+                            // on the UI thread, held up typing, for about 400 ms after a fresh start.
+                            source: resultRow.inView ? root.iconUrl(resultRow.modelData) : ""
                             sourceSize.width: 32
                             sourceSize.height: 32
                             fillMode: Image.PreserveAspectFit
-                            asynchronous: false
+                            asynchronous: true
+                            // A copied image's thumbnail takes its place once loaded.
+                            visible: !thumbnail.ready
                         }
 
                         Rectangle {
@@ -475,7 +535,7 @@ ShellRoot {
                             width: 23; height: 28; radius: 4
                             color: theme.base01
                             border.color: theme.base03
-                            visible: resultIcon.status === Image.Error
+                            visible: resultIcon.visible && resultIcon.status === Image.Error
                             Text {
                                 anchors.centerIn: parent
                                 text: resultRow.modelData.kind === "app" ? "⌘" : "≡"
@@ -484,9 +544,34 @@ ShellRoot {
                             }
                         }
 
+                        // A copied image, cropped to a square whose corners are concentric
+                        // with the card's, 16 px further out.
+                        Loader {
+                            id: thumbnail
+                            readonly property bool ready: item !== null && item.ready
+                            x: 8; y: 8
+                            width: 46; height: 46
+                            active: Boolean(resultRow.modelData.image)
+                            visible: ready
+                            sourceComponent: ClippingRectangle {
+                                readonly property bool ready: picture.status === Image.Ready
+                                radius: card.radius - 16
+                                color: "transparent"
+                                Image {
+                                    id: picture
+                                    anchors.fill: parent
+                                    source: resultRow.inView ? resultRow.modelData.image : ""
+                                    sourceSize.width: 46
+                                    sourceSize.height: 46
+                                    fillMode: Image.PreserveAspectCrop
+                                    asynchronous: true
+                                }
+                            }
+                        }
+
                         Text {
                             x: 64
-                            y: resultRow.modelData.kind === "app" ? (parent.height - height) / 2 : 11
+                            y: (parent.height - height) / 2
                             width: parent.width - x - 20
                             text: resultRow.modelData.title
                             textFormat: Text.PlainText
@@ -496,68 +581,17 @@ ShellRoot {
                             font.weight: Font.Medium
                             color: Qt.tint(root.titleColor, Qt.alpha(root.selectedTitleColor, resultRow.lit))
                         }
-                        Text {
-                            x: 64; y: 34
-                            width: parent.width - x - 20
-                            visible: resultRow.modelData.kind !== "app"
-                            text: resultRow.modelData.subtitle
-                            textFormat: Text.PlainText
-                            elide: Text.ElideMiddle
-                            font.family: uiFont.name
-                            font.pixelSize: 11
-                            color: theme.base04
-                        }
-                        Item { id: dragProxy }
                         MouseArea {
                             anchors.fill: parent
                             hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
-                            // Moving past the drag threshold drags the result out instead of clicking it.
-                            drag.target: dragProxy
-                            drag.onActiveChanged: if (drag.active) root.dragResult(resultRow.modelData)
                             onPositionChanged: mouse => root.hoverResult(resultRow.index, mapToItem(panel.contentItem, mouse.x, mouse.y))
-                            onClicked: mouse => {
+                            onClicked: {
                                 root.selectResult(resultRow.index);
-                                root.activate((mouse.modifiers & Qt.ControlModifier) !== 0);
+                                root.activate();
                             }
                         }
                     }
-                }
-            }
-
-            Text {
-                x: 26; y: 96
-                width: parent.width - 52
-                visible: root.hasQuery && root.results.length === 0
-                         && (root.phase === "error" || root.backendReady && root.phase !== "loading" && !root.searching)
-                text: root.phase === "error" ? root.statusMessage : "No results"
-                textFormat: Text.PlainText
-                elide: Text.ElideRight
-                font.family: uiFont.name
-                font.pixelSize: 12
-                color: theme.base04
-            }
-
-            Item {
-                x: 25
-                y: 88 + root.results.length * 62
-                width: parent.width - 50
-                height: 22
-                visible: root.hasQuery && root.results.length > 0
-                         && root.phase === "error"
-                Rectangle {
-                    width: 4; height: 4; radius: 2
-                    anchors.verticalCenter: parent.verticalCenter
-                    color: theme.base08
-                    opacity: 0.8
-                }
-                Text {
-                    x: 12
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: "Keyword search · model unavailable"
-                    font.family: uiFont.name
-                    font.pixelSize: 10
-                    color: theme.base04
                 }
             }
         }
