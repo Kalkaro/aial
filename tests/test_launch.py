@@ -1,5 +1,5 @@
-"""launch.sh's piped menus, against a stand-in qs that answers like the panel,
-and its app launches, against stand-in commands."""
+"""launch.sh's piped menus and namespaces, against a stand-in qs that answers like
+the panel, and its app launches, against stand-in commands."""
 import json
 import os
 from pathlib import Path
@@ -140,6 +140,15 @@ class MenuTests(unittest.TestCase):
         self.assertEqual(self.menu("3\t[[ binary data 1 KiB bmp 2x2 ]]", pick="0"),
                          ("3\t[[ binary data 1 KiB bmp 2x2 ]]\n", 0))
         self.assertEqual(self.images(), {"3": "image 3"})
+
+    def test_a_namespace_runs_from_a_copy_of_every_source_file(self):
+        process = self.launch("-n", "other", "--hidden")
+        output, _ = process.communicate(timeout=10)
+        self.assertEqual((output, process.returncode), ("", 0))
+        (copy,) = (self.runtime / "applesearch").glob("config-*")
+        self.assertEqual({path.name for path in copy.iterdir()},
+                         {path.name for path in ROOT.glob("*.qml")} | {"rofi-search.js", "fonts"})
+        self.assertEqual({path.name for path in (copy / "fonts").iterdir()}, {"Geist.ttf", "OFL.txt"})
 
     def test_cancelled_and_empty_menus_exit_1(self):
         self.assertEqual(self.menu("a\nb\n", pick="cancel"), ("", 1))

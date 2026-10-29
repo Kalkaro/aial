@@ -15,8 +15,11 @@ import "rofi-search.js" as RofiSearch
 ShellRoot {
     id: root
 
-    Theme { id: theme }
-    FontLoader { id: uiFont; source: "fonts/Geist.ttf" }
+    Config { id: config }
+    Theme { id: theme; overrides: config.colors; palettePath: config.palette }
+    FontLoader { id: bundledFont; source: "fonts/Geist.ttf" }
+    // The bundled Geist unless config.json names another family.
+    readonly property string fontFamily: config.fontFamily || bundledFont.name
 
     property bool opened: Quickshell.env("APPLESEARCH_HIDDEN") !== "1"
     property var results: []
@@ -36,8 +39,8 @@ ShellRoot {
     readonly property string directory: Quickshell.env("APPLESEARCH_SOURCE_DIR") || decodeURIComponent(Qt.resolvedUrl(".").toString().replace(/^file:\/\//, "").replace(/\/$/, ""))
     // A menu has no search field, so its lines start at the top of the card.
     readonly property int searchHeight: menuMode ? 0 : 72
-    // Seven rows fit; a longer list scrolls. Without results only the search row shows.
-    readonly property int resultsHeight: results.length ? Math.min(results.length, 7) * 62 + 16 : 0
+    // The rows set in the config fit; a longer list scrolls. Without results only the search row shows.
+    readonly property int resultsHeight: results.length ? Math.min(results.length, config.rows) * 62 + 16 : 0
     readonly property bool isHyprland: Quickshell.env("HYPRLAND_INSTANCE_SIGNATURE").length > 0
     // Result names stay dimmer until selected, then move toward white (black on light palettes).
     readonly property color titleColor: Qt.alpha(theme.base05, 0.8)
@@ -79,16 +82,11 @@ ShellRoot {
     function searchApplications(text) {
         if (text.trim().length === 0)
             return [];
-        return RofiSearch.search(text, preparedApplications, {
-            matchingMethod: "normal",
-            normalizeMatch: false,
-            sort: false,
-            sortingMethod: "normal",
-            matchFieldsSpec: "name,generic,exec,categories,keywords",
-            drunHistory: drunHistory,
-            useDrunHistory: true,
-            preferNameMatch: true
-        });
+        // rofi-search.js still lets the history order name matches, so it gets none when it is off.
+        return RofiSearch.search(text, preparedApplications, Object.assign({
+            drunHistory: config.historyEnabled ? drunHistory : ({}),
+            useDrunHistory: config.historyEnabled
+        }, config.searchOptions));
     }
 
     function matchApps() {
@@ -102,9 +100,11 @@ ShellRoot {
     }
 
     function launch(entry) {
-        let history = RofiSearch.recordDrunLaunch(drunCache.text(), entry.id);
-        drunCache.setText(history);
-        drunHistory = RofiSearch.parseDrunHistory(history);
+        if (config.historyEnabled) {
+            let history = RofiSearch.recordDrunLaunch(drunCache.text(), entry.id, config.historySize);
+            drunCache.setText(history);
+            drunHistory = RofiSearch.parseDrunHistory(history);
+        }
         hidePanel();
         // launch.sh starts the app in its own systemd unit, with the session's
         // environment rather than Quickshell's, and in a terminal if it asks for one.
@@ -115,6 +115,7 @@ ShellRoot {
     }
 
     function showPanel() {
+        config.refresh();
         theme.refresh();
         if (menuMode) {
             // A search replaces a menu, even one still fading out.
@@ -173,7 +174,7 @@ ShellRoot {
         selected = 0;
         selectionExplicit = false;
         hoverPosition = null;
-        menuHeld = fresh && menuEntries.slice(0, 7).some(entry => entry.image);
+        menuHeld = fresh && menuEntries.slice(0, config.rows).some(entry => entry.image);
         menuHeldSince = Date.now();
     }
 
@@ -262,10 +263,10 @@ ShellRoot {
         }
     }
 
-    // Seven rows fit; a longer list scrolls to keep the selected one in view.
+    // A longer list scrolls to keep the selected one in view.
     onSelectedChanged: {
-        let top = Math.min(Math.max(scroll.target, (selected - 6) * 62), selected * 62);
-        scroll.target = Math.max(0, Math.min(top, (results.length - 7) * 62));
+        let top = Math.min(Math.max(scroll.target, (selected - config.rows + 1) * 62), selected * 62);
+        scroll.target = Math.max(0, Math.min(top, (results.length - config.rows) * 62));
     }
     onResultsChanged: {
         scroll.target = 0;
@@ -312,9 +313,15 @@ ShellRoot {
                                    selected: root.selected, menu: root.menuMode, scroll: scroll.target,
                                    height: card.height + 36, surfaceHeight: panel.height,
                                    screen: panel.screen.name, namespace: root.namespace,
-                                   font: {family: uiFont.name, ready: uiFont.status === FontLoader.Ready},
+                                   font: {family: root.fontFamily, ready: bundledFont.status === FontLoader.Ready},
                                    theme: {source: theme.path, base00: theme.base00.toString(),
-                                           base05: theme.base05.toString(), accent: theme.base0D.toString(), dark: theme.dark}});
+                                           base05: theme.base05.toString(), accent: theme.base0D.toString(), dark: theme.dark},
+                                   config: {source: config.path, opacity: config.opacity, cornerRadius: config.cornerRadius,
+                                            borderOpacity: config.borderOpacity, width: config.width, topOffset: config.topOffset,
+                                            rows: config.rows, placeholder: config.placeholder,
+                                            font: {family: config.fontFamily, size: config.fontSize, searchSize: config.searchFontSize},
+                                            search: config.searchOptions,
+                                            history: {enable: config.historyEnabled, size: config.historySize}}});
         }
     }
 
@@ -326,8 +333,8 @@ ShellRoot {
         onTriggered: if (Date.now() - root.menuHeldSince > 300 || !root.thumbnailsPending()) root.releaseMenu()
     }
 
-    // Nix may replace a palette symlink without changing the watched target.
-    Timer { interval: 2000; repeat: true; running: root.opened; onTriggered: theme.refresh() }
+    // Nix may replace a config or palette symlink without changing the watched target.
+    Timer { interval: 2000; repeat: true; running: root.opened; onTriggered: { config.refresh(); theme.refresh(); } }
     Timer {
         id: focusTimer
         interval: 30
@@ -353,10 +360,10 @@ ShellRoot {
         }
         color: "transparent"
         anchors.top: true
-        margins.top: Math.min(Math.round(screen.height * 0.22), Math.max(0, screen.height - implicitHeight))
-        implicitWidth: Math.min(680, screen.width - 48)
+        margins.top: Math.min(Math.round(screen.height * config.topOffset), Math.max(0, screen.height - implicitHeight))
+        implicitWidth: Math.min(config.width, screen.width - 48)
         // Keep the Wayland surface stable; only the card inside it animates.
-        implicitHeight: Math.min(72 + 7 * 62 + 16 + 36, screen.height)
+        implicitHeight: Math.min(72 + config.rows * 62 + 16 + 36, screen.height)
         // Clicks pass through as soon as the panel starts closing.
         mask: Region { item: root.opened ? card : null; radius: card.radius }
         exclusionMode: ExclusionMode.Ignore
@@ -432,15 +439,15 @@ ShellRoot {
             Rectangle {
                 anchors.fill: parent
                 anchors.margins: 1
-                radius: card.radius * shape.zoom - 1
-                color: Qt.alpha(theme.base00, 0.8)
+                radius: Math.max(0, card.radius * shape.zoom - 1)
+                color: Qt.alpha(theme.base00, config.opacity)
             }
             Rectangle {
                 anchors.fill: parent
                 radius: card.radius * shape.zoom
                 color: "transparent"
                 border.width: 1
-                border.color: Qt.alpha(theme.base05, 0x33 / 255)
+                border.color: Qt.alpha(theme.base05, config.borderOpacity)
             }
         }
 
@@ -450,7 +457,7 @@ ShellRoot {
             y: 12
             width: parent.width - 32
             height: expansion.value
-            radius: 22
+            radius: config.cornerRadius
             color: "transparent"
             opacity: root.menuHeld ? 0 : Math.min(1, presence.value * 2) * panel.fade
             transform: presenceScale
@@ -487,11 +494,11 @@ ShellRoot {
                     width: parent.width - x - 24
                     height: parent.height
                     padding: 0
-                    font.family: uiFont.name
-                    font.pixelSize: 24
+                    font.family: root.fontFamily
+                    font.pixelSize: config.searchFontSize
                     font.weight: Font.Normal
                     color: theme.base05
-                    placeholderText: "Search apps"
+                    placeholderText: config.placeholder
                     placeholderTextColor: Qt.alpha(theme.base05, 0.65)
                     selectionColor: theme.base0D
                     selectedTextColor: theme.base00
@@ -570,7 +577,7 @@ ShellRoot {
                     // corners there stay round instead of being cut off.
                     height: Math.max(0, Math.min(62, parent.height - y))
                     // Concentric with the card's corners, which are 8 px further out.
-                    radius: card.radius - 8
+                    radius: Math.max(0, card.radius - 8)
                     color: Qt.alpha(theme.base02, 0.26)
                 }
 
@@ -583,8 +590,8 @@ ShellRoot {
                         required property int index
                         // 1 under the highlight, 0 a row away, so the name brightens as it arrives.
                         readonly property real lit: Math.max(0, 1 - Math.abs(selection.value - index * 62) / height)
-                        // In the seven rows shown, or scrolling into them.
-                        readonly property bool inView: y + height > 0 && y < 7 * 62
+                        // In the rows shown, or scrolling into them.
+                        readonly property bool inView: y + height > 0 && y < config.rows * 62
                         // A copied image that could not be loaded, so the row shows its icon instead.
                         readonly property bool imageFailed: Boolean(modelData.image) && thumbnail.item !== null && thumbnail.item.failed
                         // A copied image shown here that has not finished loading.
@@ -639,7 +646,7 @@ ShellRoot {
                                 readonly property bool ready: picture.status === Image.Ready
                                 readonly property bool failed: picture.status === Image.Error
                                 readonly property bool settled: ready || failed
-                                radius: card.radius - 16
+                                radius: Math.max(0, card.radius - 16)
                                 color: "transparent"
                                 Image {
                                     id: picture
@@ -660,8 +667,8 @@ ShellRoot {
                             text: resultRow.modelData.title
                             textFormat: Text.PlainText
                             elide: Text.ElideRight
-                            font.family: uiFont.name
-                            font.pixelSize: 15
+                            font.family: root.fontFamily
+                            font.pixelSize: config.fontSize
                             font.weight: Font.Medium
                             color: Qt.tint(root.titleColor, Qt.alpha(root.selectedTitleColor, resultRow.lit))
                         }

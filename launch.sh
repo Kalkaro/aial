@@ -154,7 +154,7 @@ if [[ "$action" == menu ]]; then
 fi
 exec 9>"$instance_dir/launch-$instance_tag.lock"
 flock -x 9
-source_hash="$(sha256sum shell.qml Spring.qml Theme.qml rofi-search.js launch.sh fonts/Geist.ttf fonts/OFL.txt | sha256sum)"
+source_hash="$(sha256sum shell.qml Config.qml Spring.qml Theme.qml rofi-search.js launch.sh fonts/Geist.ttf fonts/OFL.txt | sha256sum)"
 source_hash="${source_hash%% *}"
 
 # Runs the action in an instance, through the qs ipc command given.
@@ -228,7 +228,7 @@ if [[ "$config_dir" != "$project_dir" ]]; then
         cp "$project_dir/fonts/$font_file" "$config_dir/fonts/$font_file.tmp"
         mv -f "$config_dir/fonts/$font_file.tmp" "$config_dir/fonts/$font_file"
     done
-    for qml_file in Theme.qml Spring.qml rofi-search.js shell.qml; do
+    for qml_file in Config.qml Theme.qml Spring.qml rofi-search.js shell.qml; do
         cp "$project_dir/$qml_file" "$config_dir/$qml_file.tmp"
         mv -f "$config_dir/$qml_file.tmp" "$config_dir/$qml_file"
     done
