@@ -23,6 +23,7 @@ state = Path(os.environ["FAKE_QS_STATE"])
 if sys.argv[1] != "ipc":
     print("No running instances")
     state.write_text(os.environ.get("APPLESEARCH_HIDDEN", ""))
+    Path(f"{state}.namespace").write_text(os.environ["APPLESEARCH_NAMESPACE"])
     sys.exit(0)
 if not state.exists():
     sys.exit(255)
@@ -141,10 +142,18 @@ class MenuTests(unittest.TestCase):
                          ("3\t[[ binary data 1 KiB bmp 2x2 ]]\n", 0))
         self.assertEqual(self.images(), {"3": "image 3"})
 
+    def test_the_default_namespace_is_aial_and_runs_in_place(self):
+        process = self.launch("--hidden")
+        output, _ = process.communicate(timeout=10)
+        self.assertEqual((output, process.returncode), ("", 0))
+        self.assertEqual(Path(f"{self.state}.namespace").read_text(), "aial")
+        self.assertEqual(list((self.runtime / "applesearch").glob("config-*")), [])
+
     def test_a_namespace_runs_from_a_copy_of_every_source_file(self):
         process = self.launch("-n", "other", "--hidden")
         output, _ = process.communicate(timeout=10)
         self.assertEqual((output, process.returncode), ("", 0))
+        self.assertEqual(Path(f"{self.state}.namespace").read_text(), "other")
         (copy,) = (self.runtime / "applesearch").glob("config-*")
         self.assertEqual({path.name for path in copy.iterdir()},
                          {path.name for path in ROOT.glob("*.qml")} | {"rofi-search.js", "fonts"})

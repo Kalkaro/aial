@@ -40,7 +40,7 @@ ShellRoot {
     // The entries whose thumbnails are being loaded for it.
     property var preloadEntries: []
     property var targetScreen: Quickshell.screens[0]
-    readonly property string namespace: Quickshell.env("APPLESEARCH_NAMESPACE") || "applesearch"
+    readonly property string namespace: Quickshell.env("APPLESEARCH_NAMESPACE") || "aial"
     readonly property string directory: Quickshell.env("APPLESEARCH_SOURCE_DIR") || decodeURIComponent(Qt.resolvedUrl(".").toString().replace(/^file:\/\//, "").replace(/\/$/, ""))
     // A menu has no search field, so its lines start at the top of the card.
     readonly property int searchHeight: menuMode ? 0 : 72

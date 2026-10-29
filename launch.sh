@@ -64,7 +64,7 @@ case "${1:-}" in
     --run) shift; start_app "$@" ;;
 esac
 
-namespace=applesearch
+namespace=aial
 action=toggle
 while (( $# )); do
     case "$1" in
@@ -84,7 +84,7 @@ while (( $# )); do
                 '       COMMAND | ./launch.sh [-n NAMESPACE]' \
                 '  default          Show Spotlight; toggle it if already running.' \
                 '  piped lines      Pick one, dmenu style; print it, or exit 1 if cancelled.' \
-                '  -n, --namespace  Wayland namespace and instance name (default: applesearch).' \
+                '  -n, --namespace  Wayland namespace and instance name (default: aial).' \
                 '  --hidden         Start in the background without showing the panel.' \
                 '  --stop           Stop the selected namespace.'
             exit 0
@@ -118,7 +118,7 @@ display_tag="${display_tag//[^a-zA-Z0-9_.-]/_}"
 mkdir -p -m 700 "$instance_dir"
 instance_tag="$display_tag"
 config_dir="$project_dir"
-if [[ "$namespace" != applesearch ]]; then
+if [[ "$namespace" != aial ]]; then
     # Hash the name so arbitrary namespace strings cannot collide or form paths.
     namespace_hash="$(printf '%s' "$namespace" | sha256sum)"
     instance_tag+="-${namespace_hash%% *}"

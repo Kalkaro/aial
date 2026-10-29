@@ -105,7 +105,7 @@ Ghostty, Konsole, GNOME Terminal, Console, Xfce Terminal, or xterm.
 
 ### Namespaces
 
-`-n` or `--namespace` sets the Wayland layer namespace, default `applesearch`:
+`-n` or `--namespace` sets the Wayland layer namespace, default `aial`:
 
 ```sh
 ./launch.sh -n 123
@@ -115,7 +115,8 @@ Ghostty, Konsole, GNOME Terminal, Console, Xfce Terminal, or xterm.
 
 Each name has an independent panel; toggle, `--hidden`, and `--stop` affect only
 the selected namespace. The launch history and settings are shared. Use the
-namespace in compositor layer rules to target that panel. With Home Manager,
+namespace in compositor layer rules to target that panel, such as
+`namespace = aial` for the default one. With Home Manager,
 `programs.aial.namespace` sets the one the keybinds and the service use.
 
 ## Search
@@ -232,7 +233,7 @@ The search defaults are wave-launcher's. The Home Manager options also include:
 | Option | Default | |
 | --- | --- | --- |
 | `enable`, `package` | | Install aial. `package` is this flake's by default. |
-| `namespace` | `"applesearch"` | The panel the keybinds and the service use, as `-n`. |
+| `namespace` | `"aial"` | The panel the keybinds and the service use, as `-n`. |
 | `colors.<name>` | `null` | A color left `null` comes from the palette file. |
 | `stylix.enable` | `false` | Fill the colors not set by hand from Stylix's, which needs its Home Manager module. |
 | `font.packages` | `[ ]` | Packages that provide `font.family`. |

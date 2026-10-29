@@ -57,7 +57,7 @@ let
 
   command = lib.escapeShellArgs (
     [ (lib.getExe cfg.package) ]
-    ++ lib.optionals (cfg.namespace != "applesearch") [
+    ++ lib.optionals (cfg.namespace != "aial") [
       "-n"
       cfg.namespace
     ]
@@ -83,7 +83,7 @@ in
 
     namespace = mkOption {
       type = types.strMatching "[^-].*";
-      default = "applesearch";
+      default = "aial";
       example = "launcher";
       description = ''
         Wayland layer namespace of the panel, which compositor layer rules match.
