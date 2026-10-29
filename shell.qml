@@ -667,18 +667,15 @@ ShellRoot {
                 clip: true
                 visible: root.results.length > 0
 
-                // As in rofi, the wheel moves the selection through a long list.
+                // The wheel scrolls a long list a row per notch and leaves the selection where
+                // it is, so the highlight scrolls away with its row.
                 WheelHandler {
-                    property real travel: 0
                     target: null
                     // Touchpads scroll too, and Qt reports some mouse wheels as one.
                     acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
                     onWheel: event => {
-                        travel += event.angleDelta.y;
-                        let steps = Math.trunc(travel / 120);
-                        travel -= steps * 120;
-                        if (steps)
-                            root.selectResult(Math.max(0, Math.min(root.results.length - 1, root.selected - steps)));
+                        let limit = Math.max(0, (root.results.length - config.rows) * 62);
+                        scroll.target = Math.max(0, Math.min(scroll.target - event.angleDelta.y / 120 * 62, limit));
                     }
                 }
 

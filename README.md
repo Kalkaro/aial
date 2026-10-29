@@ -139,7 +139,8 @@ keyboard-layout matching.
 Each launch is recorded in rofi's drun history format in
 `$XDG_CACHE_HOME/applesearch.druncache` (default `~/.cache/applesearch.druncache`),
 which keeps the last 25 apps. Seven results fit at a time, unless `rows` says
-otherwise; the arrow keys and the mouse wheel scroll through the rest. The
+otherwise. The arrow keys move the selection through the rest, and the mouse
+wheel scrolls them without moving it. The
 [settings](#settings) change how words match and whether history is used.
 
 ## Clipboard history
@@ -153,8 +154,9 @@ bind = SUPER, V, exec, cliphist list | /path/to/aial/launch.sh | cliphist decode
 ```
 
 The picker has no search field. It lists the lines in their order, so
-cliphist's stay newest first, with the first one selected. The arrow keys and
-the mouse wheel move through them. Enter or a click prints the chosen line;
+cliphist's stay newest first, with the first one selected. The arrow keys move
+the selection through them, and the mouse wheel scrolls the list without moving
+it. Enter or a click prints the chosen line;
 Escape, or hiding the panel any other way, prints nothing and exits with
 status 1. A line shows the text after its first tab, so cliphist's
 `id<TAB>preview` lines show just the preview. Seven rows fit at a time by
