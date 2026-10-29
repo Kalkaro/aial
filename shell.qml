@@ -619,6 +619,10 @@ ShellRoot {
                     background: Item {}
                     focus: true
                     selectByMouse: true
+                    // The caret waits for the first typed character; the placeholder shows without it.
+                    // Gaining focus turns it on, so an empty field turns it straight off again.
+                    onCursorVisibleChanged: if (cursorVisible && length === 0) cursorVisible = false
+                    onLengthChanged: cursorVisible = length > 0 && activeFocus
                     Accessible.name: "Search applications"
                     onTextChanged: {
                         root.selected = 0;
