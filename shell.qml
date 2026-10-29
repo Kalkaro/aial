@@ -34,6 +34,11 @@ ShellRoot {
     // are in place when the card appears instead of replacing their icons in front of the user.
     property bool menuHeld: false
     property real menuHeldSince: 0
+    // A menu replacing the one on screen waits here while its thumbnails load, then swaps in whole.
+    property var pendingMenu: null
+    property real pendingSince: 0
+    // The entries whose thumbnails are being loaded for it.
+    property var preloadEntries: []
     property var targetScreen: Quickshell.screens[0]
     readonly property string namespace: Quickshell.env("APPLESEARCH_NAMESPACE") || "applesearch"
     readonly property string directory: Quickshell.env("APPLESEARCH_SOURCE_DIR") || decodeURIComponent(Qt.resolvedUrl(".").toString().replace(/^file:\/\//, "").replace(/\/$/, ""))
@@ -120,6 +125,7 @@ ShellRoot {
         if (menuMode) {
             // A search replaces a menu, even one still fading out.
             answerMenu(null);
+            answerPending();
             resetPanel();
         }
         if (panel.visible) {
@@ -142,6 +148,7 @@ ShellRoot {
     function hidePanel() {
         // Hiding without picking a line cancels a menu.
         answerMenu(null);
+        answerPending();
         // Focus returns immediately; the card fades out with its content.
         opened = false;
         menuHeld = false;
@@ -162,20 +169,64 @@ ShellRoot {
     // A menu has no search: it lists the lines in their order, so clipboard
     // history stays newest first.
     function showMenu(lines, result, images) {
+        // The rows are all built at once, so a huge input lists only its first 100 lines.
+        let entries = lines.slice(0, 100).map(line => menuEntry(line, images));
+        // A newer menu replaces one still waiting to replace the one on screen.
+        answerPending();
+        if (opened && menuMode && entries.slice(0, config.rows).some(entry => entry.image)) {
+            // Its thumbnails are in new files, so the rows would show empty slots while they
+            // load again. The menu stays as it is until they have, and the rows change in one step.
+            pendingMenu = {entries: entries, result: result};
+            preloadEntries = entries.slice(0, config.rows);
+            pendingSince = Date.now();
+            return;
+        }
+        openMenu(entries, result);
+    }
+
+    function openMenu(entries, result) {
         // A menu replacing one already on screen has nothing to wait for.
         let fresh = !panel.visible;
         // Replaces a search, or a menu still waiting for its answer.
         showPanel();
         input.text = "";
         menuResult = result;
-        // The rows are all built at once, so a huge input lists only its first 100 lines.
-        menuEntries = lines.slice(0, 100).map(line => menuEntry(line, images));
+        menuEntries = entries;
         results = menuEntries;
         selected = 0;
         selectionExplicit = false;
         hoverPosition = null;
         menuHeld = fresh && menuEntries.slice(0, config.rows).some(entry => entry.image);
         menuHeldSince = Date.now();
+    }
+
+    function applyPendingMenu() {
+        let next = pendingMenu;
+        // Cleared before opening, which would cancel it, but the thumbnails stay loaded until the rows are built.
+        pendingMenu = null;
+        openMenu(next.entries, next.result);
+        preloadEntries = [];
+    }
+
+    // Cancels the menu waiting to replace the one on screen, which its launch.sh is waiting on.
+    function answerPending() {
+        if (!pendingMenu)
+            return;
+        let file = menuFile.createObject(root, {path: pendingMenu.result, preload: false});
+        file.setText("cancelled\n");
+        file.destroy();
+        pendingMenu = null;
+        preloadEntries = [];
+    }
+
+    // Whether the thumbnails of the menu waiting to replace this one are still loading.
+    function preloading() {
+        for (let i = 0; i < preload.count; ++i) {
+            let image = preload.itemAt(i);
+            if (image && image.status === Image.Loading)
+                return true;
+        }
+        return false;
     }
 
     // Whether an image in the rows shown is still loading.
@@ -333,6 +384,13 @@ ShellRoot {
         onTriggered: if (Date.now() - root.menuHeldSince > 300 || !root.thumbnailsPending()) root.releaseMenu()
     }
 
+    Timer {
+        interval: 16
+        repeat: true
+        running: root.pendingMenu !== null
+        onTriggered: if (Date.now() - root.pendingSince > 300 || !root.preloading()) root.applyPendingMenu()
+    }
+
     // Nix may replace a config or palette symlink without changing the watched target.
     Timer { interval: 2000; repeat: true; running: root.opened; onTriggered: { config.refresh(); theme.refresh(); } }
     Timer {
@@ -375,6 +433,26 @@ ShellRoot {
             id: grab
             windows: [panel]
             onCleared: if (root.opened) root.hidePanel()
+        }
+
+        // Loads the thumbnails of a menu waiting to replace this one. The rows built afterwards
+        // find them in the cache, so they are there at once.
+        Item {
+            visible: false
+            Repeater {
+                id: preload
+                model: root.preloadEntries
+                // Set up as a thumbnail is, so the rows find what it loaded.
+                delegate: Image {
+                    required property var modelData
+                    width: 46; height: 46
+                    source: modelData.image
+                    sourceSize.width: 46
+                    sourceSize.height: 46
+                    fillMode: Image.PreserveAspectCrop
+                    asynchronous: true
+                }
+            }
         }
 
         // A new result count redirects the motion without restarting it.
@@ -592,6 +670,7 @@ ShellRoot {
                         readonly property real lit: Math.max(0, 1 - Math.abs(selection.value - index * 62) / height)
                         // In the rows shown, or scrolling into them.
                         readonly property bool inView: y + height > 0 && y < config.rows * 62
+                        readonly property real createdAt: Date.now()
                         // A copied image that could not be loaded, so the row shows its icon instead.
                         readonly property bool imageFailed: Boolean(modelData.image) && thumbnail.item !== null && thumbnail.item.failed
                         // A copied image shown here that has not finished loading.
@@ -639,9 +718,20 @@ ShellRoot {
                             x: 8; y: 8
                             width: 46; height: 46
                             active: Boolean(resultRow.modelData.image)
-                            opacity: ready ? 1 : 0
+                            opacity: 0
                             visible: opacity > 0
-                            Behavior on opacity { NumberAnimation { duration: 140; easing.type: Easing.OutQuad } }
+                            // One that is there as its row is built, from the cache, shows at once.
+                            // One that loads fades in.
+                            onReadyChanged: {
+                                fadeIn.stop();
+                                if (!ready)
+                                    opacity = 0;
+                                else if (Date.now() - resultRow.createdAt < 30)
+                                    opacity = 1;
+                                else
+                                    fadeIn.start();
+                            }
+                            NumberAnimation { id: fadeIn; target: thumbnail; property: "opacity"; to: 1; duration: 140; easing.type: Easing.OutQuad }
                             sourceComponent: ClippingRectangle {
                                 readonly property bool ready: picture.status === Image.Ready
                                 readonly property bool failed: picture.status === Image.Error
