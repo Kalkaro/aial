@@ -27,6 +27,10 @@ ShellRoot {
     property var menuEntries: []
     property string menuResult: ""
     readonly property bool menuMode: menuEntries.length > 0
+    // A menu of copied images opens transparent until the thumbnails in view have loaded, so they
+    // are in place when the card appears instead of replacing their icons in front of the user.
+    property bool menuHeld: false
+    property real menuHeldSince: 0
     property var targetScreen: Quickshell.screens[0]
     readonly property string namespace: Quickshell.env("APPLESEARCH_NAMESPACE") || "applesearch"
     readonly property string directory: Quickshell.env("APPLESEARCH_SOURCE_DIR") || decodeURIComponent(Qt.resolvedUrl(".").toString().replace(/^file:\/\//, "").replace(/\/$/, ""))
@@ -139,6 +143,7 @@ ShellRoot {
         answerMenu(null);
         // Focus returns immediately; the card fades out with its content.
         opened = false;
+        menuHeld = false;
         panel.fade = 0;
         grab.active = false;
         focusTimer.stop();
@@ -146,6 +151,7 @@ ShellRoot {
 
     // Runs once the close animation has hidden the window.
     function resetPanel() {
+        menuHeld = false;
         menuEntries = [];
         input.text = "";
         // A menu's text is always empty, so clearing it leaves the lines.
@@ -155,6 +161,8 @@ ShellRoot {
     // A menu has no search: it lists the lines in their order, so clipboard
     // history stays newest first.
     function showMenu(lines, result, images) {
+        // A menu replacing one already on screen has nothing to wait for.
+        let fresh = !panel.visible;
         // Replaces a search, or a menu still waiting for its answer.
         showPanel();
         input.text = "";
@@ -165,6 +173,25 @@ ShellRoot {
         selected = 0;
         selectionExplicit = false;
         hoverPosition = null;
+        menuHeld = fresh && menuEntries.slice(0, 7).some(entry => entry.image);
+        menuHeldSince = Date.now();
+    }
+
+    // Whether an image in the rows shown is still loading.
+    function thumbnailsPending() {
+        for (let i = 0; i < rows.count; ++i) {
+            let row = rows.itemAt(i);
+            if (row && row.thumbnailPending)
+                return true;
+        }
+        return false;
+    }
+
+    function releaseMenu() {
+        menuHeld = false;
+        // The card fades in from here, not from when the menu was asked for.
+        presence.velocity = 0;
+        presence.value = 0;
     }
 
     // Like rofi -display-columns 2, a line shows the column after its first
@@ -175,7 +202,9 @@ ShellRoot {
         // cliphist lists a copied image as "id<TAB>[[ binary data 2 MiB png 1920x1080 ]]".
         // launch.sh decodes it into the images folder, in a file named by its id.
         let image = columns.length === 2 && /^\d+$/.test(columns[0]) && /^\[\[ binary data .* \d+x\d+ \]\]$/.test(title);
-        return {title: title, kind: "line", line: line, icon: image ? "image-x-generic" : "text-x-generic",
+        // It is listed as "Image 2 MiB"; the line itself still goes back to launch.sh unchanged.
+        let size = image && /^\[\[ binary data (.*) \S+ \d+x\d+ \]\]$/.exec(title);
+        return {title: size ? "Image " + size[1] : title, kind: "line", line: line, icon: image ? "image-x-generic" : "text-x-generic",
                 image: image && images ? fileUrl(images + "/" + columns[0]) : ""};
     }
 
@@ -289,6 +318,14 @@ ShellRoot {
         }
     }
 
+    // Releases a held menu once its thumbnails are loaded, or after 300 ms, so a huge image cannot hold it up.
+    Timer {
+        interval: 16
+        repeat: true
+        running: root.menuHeld
+        onTriggered: if (Date.now() - root.menuHeldSince > 300 || !root.thumbnailsPending()) root.releaseMenu()
+    }
+
     // Nix may replace a palette symlink without changing the watched target.
     Timer { interval: 2000; repeat: true; running: root.opened; onTriggered: theme.refresh() }
     Timer {
@@ -367,8 +404,44 @@ ShellRoot {
             id: presenceScale
             origin.x: card.width / 2
             origin.y: searchRow.height / 2
-            xScale: 0.9 + 0.1 * presence.value
+            // A menu holds copied images, which resample and shimmer when scaled, so it only fades in.
+            xScale: root.menuMode ? 1 : 0.9 + 0.1 * presence.value
             yScale: xScale
+        }
+
+        // The card's fill and the border Hyprland draws on floating windows (base05 at 0x33
+        // alpha, 1 px). The card scales and grows on springs, and edges that land between
+        // pixels shimmer, so this follows the card's edges snapped to whole device pixels.
+        Item {
+            id: shape
+            readonly property real ratio: Math.max(1, panel.devicePixelRatio)
+            readonly property real zoom: presenceScale.xScale
+            function snap(value) { return Math.round(value * ratio) / ratio; }
+            // The card's edges after presenceScale, which scales about the search row's middle.
+            readonly property real snapLeft: snap(card.x + card.width / 2 * (1 - zoom))
+            readonly property real snapTop: snap(card.y + searchRow.height / 2 * (1 - zoom))
+            readonly property real snapRight: snap(card.x + card.width / 2 * (1 - zoom) + card.width * zoom)
+            readonly property real snapBottom: snap(card.y + searchRow.height / 2 + (card.height - searchRow.height / 2) * zoom)
+            x: snapLeft
+            y: snapTop
+            width: snapRight - snapLeft
+            height: snapBottom - snapTop
+            opacity: card.opacity
+
+            // Stops 1 px inside the edge, so the border is drawn over the desktop like a window's.
+            Rectangle {
+                anchors.fill: parent
+                anchors.margins: 1
+                radius: card.radius * shape.zoom - 1
+                color: Qt.alpha(theme.base00, 0.8)
+            }
+            Rectangle {
+                anchors.fill: parent
+                radius: card.radius * shape.zoom
+                color: "transparent"
+                border.width: 1
+                border.color: Qt.alpha(theme.base05, 0x33 / 255)
+            }
         }
 
         Rectangle {
@@ -378,8 +451,8 @@ ShellRoot {
             width: parent.width - 32
             height: expansion.value
             radius: 22
-            color: Qt.alpha(theme.base00, 0.8)
-            opacity: Math.min(1, presence.value * 2) * panel.fade
+            color: "transparent"
+            opacity: root.menuHeld ? 0 : Math.min(1, presence.value * 2) * panel.fade
             transform: presenceScale
             clip: true
 
@@ -502,6 +575,7 @@ ShellRoot {
                 }
 
                 Repeater {
+                    id: rows
                     model: root.results
                     delegate: Item {
                         id: resultRow
@@ -511,6 +585,11 @@ ShellRoot {
                         readonly property real lit: Math.max(0, 1 - Math.abs(selection.value - index * 62) / height)
                         // In the seven rows shown, or scrolling into them.
                         readonly property bool inView: y + height > 0 && y < 7 * 62
+                        // A copied image that could not be loaded, so the row shows its icon instead.
+                        readonly property bool imageFailed: Boolean(modelData.image) && thumbnail.item !== null && thumbnail.item.failed
+                        // A copied image shown here that has not finished loading.
+                        readonly property bool thumbnailPending: Boolean(modelData.image) && inView
+                            && !(thumbnail.item && thumbnail.item.settled)
                         y: index * 62 - scroll.value
                         width: card.width - 16
                         height: 62
@@ -521,13 +600,14 @@ ShellRoot {
                             width: 32; height: 32
                             // One letter can match dozens of apps. Loading all their icons at once,
                             // on the UI thread, held up typing, for about 400 ms after a fresh start.
-                            source: resultRow.inView ? root.iconUrl(resultRow.modelData) : ""
+                            source: resultRow.inView && showing ? root.iconUrl(resultRow.modelData) : ""
                             sourceSize.width: 32
                             sourceSize.height: 32
                             fillMode: Image.PreserveAspectFit
                             asynchronous: true
-                            // A copied image's thumbnail takes its place once loaded.
-                            visible: !thumbnail.ready
+                            // A copied image shows only its thumbnail, with no placeholder icon while it loads.
+                            readonly property bool showing: !Boolean(resultRow.modelData.image) || resultRow.imageFailed
+                            visible: showing
                         }
 
                         Rectangle {
@@ -552,9 +632,13 @@ ShellRoot {
                             x: 8; y: 8
                             width: 46; height: 46
                             active: Boolean(resultRow.modelData.image)
-                            visible: ready
+                            opacity: ready ? 1 : 0
+                            visible: opacity > 0
+                            Behavior on opacity { NumberAnimation { duration: 140; easing.type: Easing.OutQuad } }
                             sourceComponent: ClippingRectangle {
                                 readonly property bool ready: picture.status === Image.Ready
+                                readonly property bool failed: picture.status === Image.Error
+                                readonly property bool settled: ready || failed
                                 radius: card.radius - 16
                                 color: "transparent"
                                 Image {
