@@ -40,6 +40,10 @@ ShellRoot {
     // The entries whose thumbnails are being loaded for it.
     property var preloadEntries: []
     property var targetScreen: Quickshell.screens[0]
+    // Hyprland reports its monitors a few milliseconds after the panel starts, so a cold
+    // start does not know the focused one yet. The panel stays unmapped until a screen is
+    // chosen, which waits for Hyprland for at most 300 ms, instead of opening on the first.
+    property bool screenPending: true
     readonly property string namespace: Quickshell.env("APPLESEARCH_NAMESPACE") || "aial"
     readonly property string directory: Quickshell.env("APPLESEARCH_SOURCE_DIR") || decodeURIComponent(Qt.resolvedUrl(".").toString().replace(/^file:\/\//, "").replace(/\/$/, ""))
     // A menu has no search field, so its lines start at the top of the card.
@@ -119,6 +123,18 @@ ShellRoot {
         Quickshell.execDetached([directory + "/launch.sh", "--run", ...options, "--", ...Array.from(entry.command)]);
     }
 
+    // The screen the panel opens on: the focused monitor's, once Hyprland has told us it.
+    function chooseScreen() {
+        if (isHyprland && !Hyprland.focusedMonitor) {
+            screenPending = true;
+            monitorTimer.restart();
+            return;
+        }
+        monitorTimer.stop();
+        targetScreen = Quickshell.screens.find(s => s.name === Hyprland.focusedMonitor?.name) || Quickshell.screens[0];
+        screenPending = false;
+    }
+
     function showPanel() {
         config.refresh();
         theme.refresh();
@@ -133,7 +149,7 @@ ShellRoot {
             // launch that closed the panel may have reordered its results.
             matchApps();
         } else {
-            targetScreen = Quickshell.screens.find(s => s.name === Hyprland.focusedMonitor?.name) || Quickshell.screens[0];
+            chooseScreen();
             input.text = "";
             results = [];
             selected = 0;
@@ -307,7 +323,7 @@ ShellRoot {
 
     Component.onCompleted: {
         drunHistory = RofiSearch.parseDrunHistory(drunCache.text());
-        targetScreen = Quickshell.screens.find(s => s.name === Hyprland.focusedMonitor?.name) || Quickshell.screens[0];
+        chooseScreen();
         if (opened) {
             presence.value = 0;
             focusTimer.start();
@@ -394,6 +410,26 @@ ShellRoot {
     // Nix may replace a config or palette symlink without changing the watched target.
     Timer { interval: 2000; repeat: true; running: root.opened; onTriggered: { config.refresh(); theme.refresh(); } }
     Timer {
+        id: monitorTimer
+        interval: 300
+        onTriggered: {
+            root.targetScreen = Quickshell.screens[0];
+            root.screenPending = false;
+            if (root.opened)
+                focusTimer.restart();
+        }
+    }
+    Connections {
+        target: Hyprland
+        function onFocusedMonitorChanged() {
+            if (!root.screenPending)
+                return;
+            root.chooseScreen();
+            if (root.opened)
+                focusTimer.restart();
+        }
+    }
+    Timer {
         id: focusTimer
         interval: 30
         onTriggered: {
@@ -407,7 +443,7 @@ ShellRoot {
         id: panel
         screen: root.targetScreen
         // Stays mapped until the close fade ends.
-        visible: root.opened || fade > 0
+        visible: !root.screenPending && (root.opened || fade > 0)
         onVisibleChanged: if (!visible) root.resetPanel()
         // Closing fades the card out in place; reopening fades it back in.
         property real fade: root.opened ? 1 : 0
