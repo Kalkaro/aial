@@ -160,7 +160,8 @@ it. Enter or a click prints the chosen line;
 Escape, or hiding the panel any other way, prints nothing and exits with
 status 1. A line shows the text after its first tab, so cliphist's
 `id<TAB>preview` lines show just the preview. Seven rows fit at a time by
-default, and the first 100 lines are listed.
+default, and the first 100 lines are listed. Running the bind again while the
+menu is open closes it, like the Spotlight bind, printing nothing.
 
 Copied images show as thumbnails: before the menu opens, `launch.sh` runs
 `cliphist decode` on each image among those lines. An image in a format Qt

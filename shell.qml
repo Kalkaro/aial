@@ -363,6 +363,15 @@ ShellRoot {
         // Returns this process ID, which launch.sh watches in case the
         // instance stops before answering.
         function showMenu(linesPath: string, resultPath: string, imagesPath: string): int {
+            if (root.opened && root.menuMode) {
+                // Asking for a menu while one is open closes it, as its keybind toggles it. The
+                // request is cancelled too, so its launch.sh exits instead of waiting for a pick.
+                let cancelled = menuFile.createObject(root, {path: resultPath, preload: false});
+                cancelled.setText("cancelled\n");
+                cancelled.destroy();
+                root.hidePanel();
+                return Quickshell.processId;
+            }
             let file = menuFile.createObject(root, {path: linesPath});
             let lines = file.text().split(/\r?\n/);
             file.destroy();
