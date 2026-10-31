@@ -5,6 +5,7 @@
 //@ pragma Env QSG_DISTANCEFIELD_ANTIALIASING=gray
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Shapes
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
@@ -665,20 +666,26 @@ ShellRoot {
                             border.width: 1.7; border.color: theme.base05
                             y: 2
                         }
-                        Rectangle {
-                            width: 6.2; height: 1.7; radius: 1
-                            color: theme.base05; rotation: 35
-                            x: 5.4; y: 7.9
-                        }
-                        Rectangle {
-                            width: 6.2; height: 1.7; radius: 1
-                            color: theme.base05; rotation: -35
-                            x: 5.4; y: 12.4
-                        }
-                        Rectangle {
-                            width: 5; height: 1.7; radius: 1
-                            color: theme.base05
-                            x: 12; y: 13.3
+                        // The prompt: a chevron and a cursor, stroked with round ends and joins.
+                        Shape {
+                            anchors.fill: parent
+                            layer.enabled: true
+                            layer.samples: 4
+                            ShapePath {
+                                strokeColor: theme.base05
+                                strokeWidth: 1.7
+                                fillColor: "transparent"
+                                capStyle: ShapePath.RoundCap
+                                joinStyle: ShapePath.RoundJoin
+                                PathPolyline { path: [Qt.point(6.4, 8), Qt.point(10.4, 11.5), Qt.point(6.4, 15)] }
+                            }
+                            ShapePath {
+                                strokeColor: theme.base05
+                                strokeWidth: 1.7
+                                fillColor: "transparent"
+                                capStyle: ShapePath.RoundCap
+                                PathPolyline { path: [Qt.point(12.6, 15), Qt.point(16.6, 15)] }
+                            }
                         }
                     }
                 }
