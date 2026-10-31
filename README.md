@@ -143,6 +143,11 @@ otherwise. The arrow keys move the selection through the rest, and the mouse
 wheel scrolls them without moving it. The
 [settings](#settings) change how words match and whether history is used.
 
+A query that starts with `!` is a shell command instead: `!notify-send hello`
+shows the command as the one result, and Enter runs it with `sh -c`, in its own
+systemd unit like an app. While it is typed, the magnifying glass turns into a
+shell prompt.
+
 ## Clipboard history
 
 Lines piped into the launcher turn the panel into a dmenu-style picker, like
