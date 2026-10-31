@@ -102,9 +102,9 @@ ShellRoot {
     }
 
     function matchApps() {
+        // A shell command is the field's text, with no result row to repeat it.
         if (shellMode) {
-            let command = input.text.trim();
-            results = command ? [{id: "shell", title: command, kind: "shell", icon: "utilities-terminal", command: command}] : [];
+            results = [];
             selected = 0;
             selectionExplicit = false;
             return;
@@ -306,13 +306,17 @@ ShellRoot {
     }
 
     function activate() {
+        if (shellMode) {
+            let command = input.text.trim();
+            if (command)
+                runShell(command);
+            return;
+        }
         if (!results.length || selected < 0 || selected >= results.length)
             return;
         if (menuMode) {
             answerMenu(results[selected].line);
             hidePanel();
-        } else if (results[selected].kind === "shell") {
-            runShell(results[selected].command);
         } else {
             launch(results[selected].entry);
         }
@@ -866,7 +870,7 @@ ShellRoot {
                             visible: resultIcon.visible && resultIcon.status === Image.Error
                             Text {
                                 anchors.centerIn: parent
-                                text: resultRow.modelData.kind === "app" ? "⌘" : resultRow.modelData.kind === "shell" ? ">_" : "≡"
+                                text: resultRow.modelData.kind === "app" ? "⌘" : "≡"
                                 font.pixelSize: 15
                                 color: theme.base05
                             }
