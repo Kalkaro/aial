@@ -305,26 +305,7 @@ ShellRoot {
         menuResult = "";
     }
 
-    // Typing waits this long before the results change, so they do not flicker on every key.
-    readonly property int searchDelayMs: 120
-    Timer {
-        id: searchDelay
-        interval: root.searchDelayMs
-        onTriggered: root.flushSearch()
-    }
-
-    // Shows the results for the text now, without waiting out the delay.
-    function flushSearch() {
-        searchDelay.stop();
-        selected = 0;
-        selectionExplicit = false;
-        matchApps();
-    }
-
     function activate() {
-        // Enter right after a keystroke picks from the results of what is typed, not the last ones shown.
-        if (searchDelay.running)
-            flushSearch();
         if (!results.length || selected < 0 || selected >= results.length)
             return;
         if (menuMode) {
@@ -399,7 +380,6 @@ ShellRoot {
             if (!root.opened || root.menuMode)
                 root.showPanel();
             input.text = query;
-            root.flushSearch();
         }
         // Returns this process ID, which launch.sh watches in case the
         // instance stops before answering.
@@ -728,12 +708,10 @@ ShellRoot {
                             text = text.slice(1);
                             return;
                         }
+                        root.selected = 0;
+                        root.selectionExplicit = false;
                         root.hoverPosition = null;
-                        // Results follow typing after a short pause. An emptied field clears at once.
-                        if (text.length === 0)
-                            root.flushSearch();
-                        else
-                            searchDelay.restart();
+                        root.matchApps();
                     }
                     Keys.forwardTo: [navigation]
                     Keys.onPressed: event => {
