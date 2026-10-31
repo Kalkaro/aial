@@ -30,6 +30,9 @@ ShellRoot {
     property var menuEntries: []
     property string menuResult: ""
     readonly property bool menuMode: menuEntries.length > 0
+    // Typing ! first turns the field into a shell command to run, not an application to find.
+    // The ! itself is not kept in the field; Backspace in the empty field leaves the mode.
+    property bool shellMode: false
     // A menu of copied images opens transparent until the thumbnails in view have loaded, so they
     // are in place when the card appears instead of replacing their icons in front of the user.
     property bool menuHeld: false
@@ -99,6 +102,13 @@ ShellRoot {
     }
 
     function matchApps() {
+        if (shellMode) {
+            let command = input.text.trim();
+            results = command ? [{id: "shell", title: command, kind: "shell", icon: "utilities-terminal", command: command}] : [];
+            selected = 0;
+            selectionExplicit = false;
+            return;
+        }
         // A row picked with the keys or pointer stays selected if it is still listed.
         let previous = selectionExplicit && selected >= 0 && selected < results.length ? results[selected].id : "";
         results = searchApplications(input.text).map(entry => ({id: entry.id, title: entry.name, kind: "app",
@@ -121,6 +131,12 @@ ShellRoot {
         if (entry.workingDirectory)
             options.push("--directory", entry.workingDirectory);
         Quickshell.execDetached([directory + "/launch.sh", "--run", ...options, "--", ...Array.from(entry.command)]);
+    }
+
+    function runShell(command) {
+        hidePanel();
+        // Like an app, in its own systemd unit with the session's environment.
+        Quickshell.execDetached([directory + "/launch.sh", "--run", "--", "sh", "-c", command]);
     }
 
     // The screen the panel opens on: the focused monitor's, once Hyprland has told us it.
@@ -150,6 +166,7 @@ ShellRoot {
             matchApps();
         } else {
             chooseScreen();
+            shellMode = false;
             input.text = "";
             results = [];
             selected = 0;
@@ -177,6 +194,7 @@ ShellRoot {
     function resetPanel() {
         menuHeld = false;
         menuEntries = [];
+        shellMode = false;
         input.text = "";
         // A menu's text is always empty, so clearing it leaves the lines.
         results = [];
@@ -205,6 +223,7 @@ ShellRoot {
         let fresh = !panel.visible;
         // Replaces a search, or a menu still waiting for its answer.
         showPanel();
+        shellMode = false;
         input.text = "";
         menuResult = result;
         menuEntries = entries;
@@ -286,12 +305,33 @@ ShellRoot {
         menuResult = "";
     }
 
+    // Typing waits this long before the results change, so they do not flicker on every key.
+    readonly property int searchDelayMs: 120
+    Timer {
+        id: searchDelay
+        interval: root.searchDelayMs
+        onTriggered: root.flushSearch()
+    }
+
+    // Shows the results for the text now, without waiting out the delay.
+    function flushSearch() {
+        searchDelay.stop();
+        selected = 0;
+        selectionExplicit = false;
+        matchApps();
+    }
+
     function activate() {
+        // Enter right after a keystroke picks from the results of what is typed, not the last ones shown.
+        if (searchDelay.running)
+            flushSearch();
         if (!results.length || selected < 0 || selected >= results.length)
             return;
         if (menuMode) {
             answerMenu(results[selected].line);
             hidePanel();
+        } else if (results[selected].kind === "shell") {
+            runShell(results[selected].command);
         } else {
             launch(results[selected].entry);
         }
@@ -359,6 +399,7 @@ ShellRoot {
             if (!root.opened || root.menuMode)
                 root.showPanel();
             input.text = query;
+            root.flushSearch();
         }
         // Returns this process ID, which launch.sh watches in case the
         // instance stops before answering.
@@ -386,7 +427,7 @@ ShellRoot {
                                    results: root.results.map(result => ({id: result.id, title: result.title, kind: result.kind,
                                                                          icon: result.icon, line: result.line,
                                                                          image: result.image})),
-                                   selected: root.selected, menu: root.menuMode, scroll: scroll.target,
+                                   selected: root.selected, menu: root.menuMode, shell: root.shellMode, scroll: scroll.target,
                                    height: card.height + 36, surfaceHeight: panel.height,
                                    screen: panel.screen.name, namespace: root.namespace,
                                    font: {family: root.fontFamily, ready: bundledFont.status === FontLoader.Ready},
@@ -516,6 +557,15 @@ ShellRoot {
             precision: 0.002
             enabled: panel.visible
         }
+        // The search icon turns from a magnifying glass into a shell prompt.
+        Spring {
+            id: shellIcon
+            target: root.shellMode ? 1 : 0
+            response: 0.28
+            damping: 0.8
+            precision: 0.002
+            enabled: panel.visible
+        }
         // The selection highlight glides to the selected row.
         Spring {
             id: selection
@@ -598,16 +648,54 @@ ShellRoot {
                     width: 23
                     height: 23
                     opacity: 0.65
-                    Rectangle {
-                        width: 15; height: 15; radius: 8
-                        color: "transparent"
-                        border.width: 1.7; border.color: theme.base05
-                        x: 1; y: 1
+
+                    Item {
+                        anchors.fill: parent
+                        opacity: Math.max(0, Math.min(1, 1 - shellIcon.value))
+                        scale: 1 - 0.35 * Math.min(1, shellIcon.value)
+                        rotation: -40 * Math.min(1, shellIcon.value)
+                        visible: opacity > 0
+                        Rectangle {
+                            width: 15; height: 15; radius: 8
+                            color: "transparent"
+                            border.width: 1.7; border.color: theme.base05
+                            x: 1; y: 1
+                        }
+                        Rectangle {
+                            width: 9; height: 1.7; radius: 1
+                            color: theme.base05; rotation: 45
+                            x: 13; y: 17
+                        }
                     }
-                    Rectangle {
-                        width: 9; height: 1.7; radius: 1
-                        color: theme.base05; rotation: 45
-                        x: 13; y: 17
+
+                    // A terminal window holding a prompt.
+                    Item {
+                        anchors.fill: parent
+                        opacity: Math.max(0, Math.min(1, shellIcon.value))
+                        scale: 0.65 + 0.35 * shellIcon.value
+                        rotation: 40 * (1 - Math.min(1, shellIcon.value))
+                        visible: opacity > 0
+                        Rectangle {
+                            width: 23; height: 19; radius: 5
+                            color: "transparent"
+                            border.width: 1.7; border.color: theme.base05
+                            y: 2
+                        }
+                        Rectangle {
+                            width: 6.2; height: 1.7; radius: 1
+                            color: theme.base05; rotation: 35
+                            x: 5.4; y: 7.9
+                        }
+                        Rectangle {
+                            width: 6.2; height: 1.7; radius: 1
+                            color: theme.base05; rotation: -35
+                            x: 5.4; y: 12.4
+                        }
+                        Rectangle {
+                            width: 5; height: 1.7; radius: 1
+                            color: theme.base05
+                            x: 12; y: 13.3
+                        }
                     }
                 }
 
@@ -621,7 +709,7 @@ ShellRoot {
                     font.pixelSize: config.searchFontSize
                     font.weight: Font.Normal
                     color: theme.base05
-                    placeholderText: config.placeholder
+                    placeholderText: root.shellMode ? "Run a shell command" : config.placeholder
                     placeholderTextColor: Qt.alpha(theme.base05, 0.65)
                     selectionColor: theme.base0D
                     selectedTextColor: theme.base00
@@ -634,12 +722,27 @@ ShellRoot {
                     onLengthChanged: cursorVisible = length > 0 && activeFocus
                     Accessible.name: "Search applications"
                     onTextChanged: {
-                        root.selected = 0;
-                        root.selectionExplicit = false;
+                        if (!root.menuMode && !root.shellMode && text.startsWith("!")) {
+                            root.shellMode = true;
+                            // The change this makes runs the rest.
+                            text = text.slice(1);
+                            return;
+                        }
                         root.hoverPosition = null;
-                        root.matchApps();
+                        // Results follow typing after a short pause. An emptied field clears at once.
+                        if (text.length === 0)
+                            root.flushSearch();
+                        else
+                            searchDelay.restart();
                     }
                     Keys.forwardTo: [navigation]
+                    Keys.onPressed: event => {
+                        if (event.key === Qt.Key_Backspace && root.shellMode && length === 0) {
+                            root.shellMode = false;
+                            root.matchApps();
+                            event.accepted = true;
+                        }
+                    }
                 }
 
             }
@@ -761,7 +864,7 @@ ShellRoot {
                             visible: resultIcon.visible && resultIcon.status === Image.Error
                             Text {
                                 anchors.centerIn: parent
-                                text: resultRow.modelData.kind === "app" ? "⌘" : "≡"
+                                text: resultRow.modelData.kind === "app" ? "⌘" : resultRow.modelData.kind === "shell" ? ">_" : "≡"
                                 font.pixelSize: 15
                                 color: theme.base05
                             }
