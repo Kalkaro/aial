@@ -660,6 +660,17 @@ ShellRoot {
                         root.selectResult(Math.max(root.selected - 1, 0));
                     event.accepted = true;
                 }
+                // Tab and Shift+Tab step the same way as Down and Up.
+                Keys.onTabPressed: event => {
+                    if (root.results.length)
+                        root.selectResult(Math.min(root.selected + 1, root.results.length - 1));
+                    event.accepted = true;
+                }
+                Keys.onBacktabPressed: event => {
+                    if (root.results.length)
+                        root.selectResult(Math.max(root.selected - 1, 0));
+                    event.accepted = true;
+                }
                 Keys.onReturnPressed: root.activate()
                 Keys.onEnterPressed: root.activate()
             }
