@@ -145,8 +145,9 @@ wheel scrolls them without moving it. The
 
 A query that starts with `!` is a shell command instead: `!notify-send hello`
 shows the command as the one result, and Enter runs it with `sh -c`, in its own
-systemd unit like an app. While it is typed, the magnifying glass turns into a
-shell prompt.
+systemd unit like an app. The `!` itself is not kept in the field. Backspace in the
+empty field leaves the mode. While it is on, the magnifying glass turns into a
+shell prompt and the hint changes to "Run a shell command".
 
 ## Clipboard history
 

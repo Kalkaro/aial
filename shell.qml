@@ -679,6 +679,32 @@ ShellRoot {
                     }
                 }
 
+                // The empty field's hint, drawn here instead of as the field's placeholderText so it
+                // can change with the search icon: one slides up and out as the other comes in.
+                Repeater {
+                    model: [
+                        {text: config.placeholder, shell: false},
+                        {text: "Run a shell command", shell: true}
+                    ]
+                    Text {
+                        required property var modelData
+                        readonly property real amount: Math.max(0, Math.min(1, modelData.shell ? shellIcon.value : 1 - shellIcon.value))
+                        x: input.x
+                        // Rises 8 px as it leaves, and settles from 8 px below as it arrives.
+                        y: (searchRow.height - height) / 2 + (modelData.shell ? 8 * (1 - shellIcon.value) : -8 * shellIcon.value)
+                        width: input.width
+                        text: modelData.text
+                        textFormat: Text.PlainText
+                        elide: Text.ElideRight
+                        font.family: root.fontFamily
+                        font.pixelSize: config.searchFontSize
+                        font.weight: Font.Normal
+                        color: Qt.alpha(theme.base05, 0.65)
+                        opacity: amount
+                        visible: input.length === 0 && input.preeditText === "" && amount > 0
+                    }
+                }
+
                 TextField {
                     id: input
                     x: 62
@@ -689,8 +715,6 @@ ShellRoot {
                     font.pixelSize: config.searchFontSize
                     font.weight: Font.Normal
                     color: theme.base05
-                    placeholderText: root.shellMode ? "Run a shell command" : config.placeholder
-                    placeholderTextColor: Qt.alpha(theme.base05, 0.65)
                     selectionColor: theme.base0D
                     selectedTextColor: theme.base00
                     background: Item {}
