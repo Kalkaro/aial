@@ -46,6 +46,7 @@ let
       rows
       placeholder
       history
+      shell
       ;
     font = {
       inherit (cfg.font) size searchSize;
@@ -292,6 +293,35 @@ in
         default = 25;
         description = "How many apps the launch history keeps.";
       };
+    };
+
+    shell.commands = mkOption {
+      type = types.listOf (types.strMatching "[^[:space:]]+");
+      default = [
+        "poweroff"
+        "reboot"
+        "shutdown"
+        "halt"
+        "pkill"
+        "kill"
+        "killall"
+        "systemctl"
+        "loginctl"
+        "hyprctl"
+        "notify-send"
+        "playerctl"
+        "wpctl"
+        "pactl"
+        "brightnessctl"
+        "nmcli"
+        "xdg-open"
+        "wl-copy"
+      ];
+      example = [
+        "reboot"
+        "pkill"
+      ];
+      description = "Commands that turn the query into a shell command, as `!` does, when typed as its first word.";
     };
 
     service.enable = mkOption {

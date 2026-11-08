@@ -92,6 +92,7 @@ let
         ];
       };
       history.enable = false;
+      shell.commands = [ "reboot" ];
       service.enable = false;
       hyprlandKeybind = "SUPER, SPACE";
       hyprlandClipboardKeybind = "SUPER, V";
@@ -162,6 +163,26 @@ let
           enable = true;
           size = 25;
         };
+        shell.commands = [
+          "poweroff"
+          "reboot"
+          "shutdown"
+          "halt"
+          "pkill"
+          "kill"
+          "killall"
+          "systemctl"
+          "loginctl"
+          "hyprctl"
+          "notify-send"
+          "playerctl"
+          "wpctl"
+          "pactl"
+          "brightnessctl"
+          "nmcli"
+          "xdg-open"
+          "wl-copy"
+        ];
       }
     ) "defaults: ${builtins.toJSON (configOf plain)}")
     (lib.assertMsg (plain.home.packages == [ self.packages.${system}.default ]) "package is installed")
@@ -211,6 +232,7 @@ let
           enable = false;
           size = 25;
         };
+        shell.commands = [ "reboot" ];
       }
     ) "customized: ${builtins.toJSON (configOf customized)}")
     (lib.assertMsg (!(customized.systemd.user.services ? aial)) "the service can be turned off")
