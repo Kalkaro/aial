@@ -149,6 +149,15 @@ systemd unit like an app. The `!` itself is not kept in the field. Backspace in 
 empty field leaves the mode. While it is on, the magnifying glass turns into a
 shell prompt and the hint changes to "Run a shell command".
 
+Some commands switch to it by themselves when typed as the query's first word,
+with no `!`: `reboot`, `pkill firefox` or `systemctl suspend` run on Enter
+instead of searching. The word stays in the field, and the mode goes off again
+once the first word is no longer one of them. `shell.commands` in the
+[settings](#settings) lists them; by default they are `poweroff`, `reboot`,
+`shutdown`, `halt`, `pkill`, `kill`, `killall`, `systemctl`, `loginctl`,
+`hyprctl`, `notify-send`, `playerctl`, `wpctl`, `pactl`, `brightnessctl`,
+`nmcli`, `xdg-open` and `wl-copy`.
+
 ## Clipboard history
 
 Lines piped into the launcher turn the panel into a dmenu-style picker, like
@@ -236,6 +245,7 @@ this file from `programs.aial`, with the same names:
 | `search.preferNameMatch` | `true` | Apps matching by name come first. |
 | `history.enable` | `true` | Recent apps come first, and launches are recorded. |
 | `history.size` | `25` | Apps the history keeps. |
+| `shell.commands` | `["poweroff", "reboot", …]` | Words that make the query a shell command, as `!` does. `[]` turns this off. |
 
 The search defaults are wave-launcher's. The Home Manager options also include:
 

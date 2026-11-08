@@ -34,6 +34,9 @@ ShellRoot {
     // Typing ! first turns the field into a shell command to run, not an application to find.
     // The ! itself is not kept in the field; Backspace in the empty field leaves the mode.
     property bool shellMode: false
+    // A query whose first word is one of config.shellCommands, such as "reboot" or "pkill firefox",
+    // turns it on too, keeping the word. It goes off again once the word is no longer one of them.
+    property bool shellDetected: false
     // A menu of copied images opens transparent until the thumbnails in view have loaded, so they
     // are in place when the card appears instead of replacing their icons in front of the user.
     property bool menuHeld: false
@@ -168,6 +171,7 @@ ShellRoot {
         } else {
             chooseScreen();
             shellMode = false;
+            shellDetected = false;
             input.text = "";
             results = [];
             selected = 0;
@@ -196,6 +200,7 @@ ShellRoot {
         menuHeld = false;
         menuEntries = [];
         shellMode = false;
+        shellDetected = false;
         input.text = "";
         // A menu's text is always empty, so clearing it leaves the lines.
         results = [];
@@ -225,6 +230,7 @@ ShellRoot {
         // Replaces a search, or a menu still waiting for its answer.
         showPanel();
         shellMode = false;
+        shellDetected = false;
         input.text = "";
         menuResult = result;
         menuEntries = entries;
@@ -742,6 +748,11 @@ ShellRoot {
                             // The change this makes runs the rest.
                             text = text.slice(1);
                             return;
+                        }
+                        // A mode turned on with ! stays on whatever is typed.
+                        if (!root.menuMode && (!root.shellMode || root.shellDetected)) {
+                            root.shellDetected = config.shellCommands.indexOf(text.split(/\s/)[0]) >= 0;
+                            root.shellMode = root.shellDetected;
                         }
                         root.selected = 0;
                         root.selectionExplicit = false;

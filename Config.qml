@@ -67,6 +67,15 @@ QtObject {
     readonly property bool historyEnabled: flag(section("history").enable, true)
     readonly property int historySize: integer(section("history").size, 25, 1, 1000)
 
+    // Commands that switch the field to a shell command when typed as its first word, without the !.
+    readonly property var shellCommands: {
+        let value = section("shell").commands;
+        return Array.isArray(value) ? value.filter(name => typeof name === "string" && /^\S+$/.test(name))
+            : ["poweroff", "reboot", "shutdown", "halt", "pkill", "kill", "killall", "systemctl",
+               "loginctl", "hyprctl", "notify-send", "playerctl", "wpctl", "pactl", "brightnessctl",
+               "nmcli", "xdg-open", "wl-copy"];
+    }
+
     // The text last parsed, so reading an unchanged file again leaves the settings alone.
     property string loaded: ""
 
