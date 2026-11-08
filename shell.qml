@@ -51,6 +51,11 @@ ShellRoot {
     // start does not know the focused one yet. The panel stays unmapped until a screen is
     // chosen, which waits for Hyprland for at most 300 ms, instead of opening on the first.
     property bool screenPending: true
+    // A closed panel keeps its window mapped, drawing nothing and taking no input, so opening
+    // only asks for keyboard focus. A new window gets none until its first frame is on screen,
+    // and keys typed until then went to the app below. A fullscreen window has its monitor to
+    // itself, where Hyprland can scan it out directly, so the window goes while one is focused.
+    readonly property bool keepMapped: !(Hyprland.focusedMonitor?.activeWorkspace?.hasFullscreen ?? false)
     readonly property string namespace: Quickshell.env("APPLESEARCH_NAMESPACE") || "aial"
     readonly property string directory: Quickshell.env("APPLESEARCH_SOURCE_DIR") || decodeURIComponent(Qt.resolvedUrl(".").toString().replace(/^file:\/\//, "").replace(/\/$/, ""))
     // A menu has no search field, so its lines start at the top of the card.
@@ -164,7 +169,7 @@ ShellRoot {
             answerPending();
             resetPanel();
         }
-        if (panel.visible) {
+        if (panel.shown) {
             // Reopening during the close fade reverses it and keeps the query. A
             // launch that closed the panel may have reordered its results.
             matchApps();
@@ -178,6 +183,9 @@ ShellRoot {
             selectionExplicit = false;
             presence.value = 0;
         }
+        // The field takes the keys as soon as the window has keyboard focus.
+        if (!menuMode)
+            input.forceActiveFocus();
         panel.fade = 1;
         opened = true;
         focusTimer.restart();
@@ -226,7 +234,7 @@ ShellRoot {
 
     function openMenu(entries, result) {
         // A menu replacing one already on screen has nothing to wait for.
-        let fresh = !panel.visible;
+        let fresh = !panel.shown;
         // Replaces a search, or a menu still waiting for its answer.
         showPanel();
         shellMode = false;
@@ -463,8 +471,12 @@ ShellRoot {
     Connections {
         target: Hyprland
         function onFocusedMonitorChanged() {
-            if (!root.screenPending)
+            // A closed panel moves to the focused monitor ahead of opening there.
+            if (!root.screenPending) {
+                if (!panel.shown)
+                    root.chooseScreen();
                 return;
+            }
             root.chooseScreen();
             if (root.opened)
                 focusTimer.restart();
@@ -483,22 +495,26 @@ ShellRoot {
     PanelWindow {
         id: panel
         screen: root.targetScreen
-        // Stays mapped until the close fade ends.
-        visible: !root.screenPending && (root.opened || fade > 0)
-        onVisibleChanged: if (!visible) root.resetPanel()
+        // Open, or fading out after closing.
+        readonly property bool shown: !root.screenPending && (root.opened || fade > 0)
+        visible: shown || (!root.screenPending && root.keepMapped)
+        onShownChanged: if (!shown) root.resetPanel()
         // Closing fades the card out in place; reopening fades it back in.
         property real fade: root.opened ? 1 : 0
         Behavior on fade {
             // A fresh open sets it while hidden, leaving that fade to the pop.
-            enabled: panel.visible
+            enabled: panel.shown
             NumberAnimation { duration: 120; easing.type: Easing.OutQuad }
         }
         color: "transparent"
         anchors.top: true
-        margins.top: Math.min(Math.round(screen.height * config.topOffset), Math.max(0, screen.height - implicitHeight))
-        implicitWidth: Math.min(config.width, screen.width - 48)
-        // Keep the Wayland surface stable; only the card inside it animates.
-        implicitHeight: Math.min(72 + config.rows * 62 + 16 + 36, screen.height)
+        margins.top: Math.min(Math.round(screen.height * config.topOffset), Math.max(0, screen.height - openHeight))
+        readonly property int openWidth: Math.min(config.width, screen.width - 48)
+        // The surface keeps one size while open; only the card inside it animates.
+        readonly property int openHeight: Math.min(72 + config.rows * 62 + 16 + 36, screen.height)
+        // A closed panel shrinks to a pixel, leaving Hyprland no area to blur behind it.
+        implicitWidth: shown ? openWidth : 1
+        implicitHeight: shown ? openHeight : 1
         // Clicks pass through as soon as the panel starts closing.
         mask: Region { item: root.opened ? card : null; radius: card.radius }
         exclusionMode: ExclusionMode.Ignore
@@ -535,8 +551,8 @@ ShellRoot {
         // A new result count redirects the motion without restarting it.
         Spring {
             id: expansion
-            target: Math.min(root.searchHeight + root.resultsHeight, panel.implicitHeight - 36)
-            enabled: panel.visible
+            target: Math.min(root.searchHeight + root.resultsHeight, panel.openHeight - 36)
+            enabled: panel.shown
         }
 
         // Opening pops the card in from its search row.
@@ -546,7 +562,7 @@ ShellRoot {
             response: 0.32
             damping: 0.72
             precision: 0.002
-            enabled: panel.visible
+            enabled: panel.shown
         }
         // The search icon turns from a magnifying glass into a shell prompt.
         Spring {
@@ -555,20 +571,20 @@ ShellRoot {
             response: 0.28
             damping: 0.8
             precision: 0.002
-            enabled: panel.visible
+            enabled: panel.shown
         }
         // The selection highlight glides to the selected row.
         Spring {
             id: selection
             target: root.selected * 62
             response: 0.1
-            enabled: panel.visible
+            enabled: panel.shown
         }
         // A long list scrolls with the same motion, so the highlight moves with its row.
         Spring {
             id: scroll
             response: 0.1
-            enabled: panel.visible
+            enabled: panel.shown
         }
 
         Scale {
@@ -619,7 +635,7 @@ ShellRoot {
             id: card
             x: 16
             y: 12
-            width: parent.width - 32
+            width: panel.openWidth - 32
             height: expansion.value
             radius: config.cornerRadius
             color: "transparent"
